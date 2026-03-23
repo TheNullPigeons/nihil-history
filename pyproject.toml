@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nihil-history"
+version = "0.1.0"
+description = "Engagement-centric offensive history and access graph tool."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "sqlalchemy>=2.0.0",
+    "textual>=0.80.0",
+    "alembic>=1.13.0",
+    "cryptography>=43.0.0",
+]
+
+authors = [{ name = "TheNullPigeons" }]
+license = "MIT"
+
+[project.scripts]
+nihil-history = "nihil_history.cli:app"
+nxh = "nihil_history.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.setuptools]
+packages = ["nihil_history"]

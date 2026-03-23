@@ -1,0 +1,3 @@
+[console_scripts]
+nihil-history = nihil_history.cli:app
+nxh = nihil_history.cli:app
