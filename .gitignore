@@ -5,25 +5,46 @@ __pycache__/
 *.pyd
 *.so
 *.egg-info/
+*.egg
+*.whl
+*.pyc
+*.pkl
 
 # Virtual environments
 .venv/
 venv/
+.venv_pkgtest/
+.python-version
 
 # Tooling caches/reports
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
 .coverage
+.coverage.*
 htmlcov/
+.benchmarks/
 
 # Local runtime/test data
-.nh-test/
-.nh-v3/
+.nh-*/
 .nihil-history/
 *.db
 *.sqlite3
+*.sqlite
 secret.key
+*.key
 report.json
 report.md
+report*.json
+report*.md
 sample.xml
+*.tmp
+*.bak
+
+# Build artifacts
+build/
+dist/
+site/
+pip-wheel-metadata/
