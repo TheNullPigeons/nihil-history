@@ -14,6 +14,7 @@ from nihil_history.validators import (
     validate_domain,
     validate_ip,
     validate_protocol,
+    validate_secret_format,
     validate_status,
     require_non_empty,
 )
@@ -26,7 +27,7 @@ class MissingEngagementError(RuntimeError):
 def _current_engagement_name() -> str:
     cfg = load_config()
     if not cfg.current_engagement:
-        raise MissingEngagementError("No active engagement. Use `nxh engagement use <name>`.")
+        raise MissingEngagementError("No active engagement. Use `nhi engagement use <name>`.")
     return cfg.current_engagement
 
 
@@ -101,11 +102,19 @@ def _materialize_credential_secret(entry: Credential) -> Credential:
     return entry
 
 
-def creds_add(username: str, secret: str | None, domain: str | None, cred_type: str, source: str = "manual") -> Credential:
+def creds_add(
+    username: str,
+    secret: str | None,
+    domain: str | None,
+    cred_type: str,
+    secret_format: str | None = None,
+    source: str = "manual",
+) -> Credential:
     init_db()
     username = require_non_empty(username, "username")
     domain = validate_domain(domain)
     cred_type = validate_cred_type(cred_type)
+    secret_format = validate_secret_format(secret_format)
     with get_session() as session:
         cred = Credential(
             engagement_id=_engagement_id(),
@@ -113,6 +122,7 @@ def creds_add(username: str, secret: str | None, domain: str | None, cred_type: 
             secret=_normalized_secret_for_storage(secret),
             domain=domain,
             cred_type=cred_type,
+            secret_format=secret_format,
             source=source,
         )
         session.add(cred)
@@ -156,11 +166,19 @@ def creds_remove(cred_id: int) -> None:
         save_config(cfg)
 
 
-def creds_update(cred_id: int, username: str, secret: str | None, domain: str | None, cred_type: str) -> Credential:
+def creds_update(
+    cred_id: int,
+    username: str,
+    secret: str | None,
+    domain: str | None,
+    cred_type: str,
+    secret_format: str | None = None,
+) -> Credential:
     eid = _engagement_id()
     username = require_non_empty(username, "username")
     domain = validate_domain(domain)
     cred_type = validate_cred_type(cred_type)
+    secret_format = validate_secret_format(secret_format)
     with get_session() as session:
         cred = session.scalar(select(Credential).where(Credential.id == cred_id, Credential.engagement_id == eid))
         if cred is None:
@@ -169,6 +187,7 @@ def creds_update(cred_id: int, username: str, secret: str | None, domain: str | 
         cred.secret = _normalized_secret_for_storage(secret)
         cred.domain = domain
         cred.cred_type = cred_type
+        cred.secret_format = secret_format
         session.commit()
         session.refresh(cred)
         return _materialize_credential_secret(cred)
@@ -330,6 +349,7 @@ def report_payload(include_secrets: bool = False) -> dict:
                 "username": c.username,
                 "domain": c.domain,
                 "type": c.cred_type,
+                "format": c.secret_format,
                 "source": c.source,
                 "secret": c.secret if include_secrets else None,
             }
@@ -370,13 +390,13 @@ def export_report_markdown(include_secrets: bool = False) -> str:
         "",
         "## Credentials",
         "",
-        "| ID | Username | Domain | Type | Source | Secret |",
-        "|---:|---|---|---|---|---|",
+        "| ID | Username | Domain | Type | Format | Source | Secret |",
+        "|---:|---|---|---|---|---|---|",
     ]
     for item in data["credentials"]:
         secret = item["secret"] if include_secrets and item["secret"] else "-"
         lines.append(
-            f"| {item['id']} | {item['username']} | {item['domain'] or '-'} | {item['type']} | {item['source']} | {secret} |"
+            f"| {item['id']} | {item['username']} | {item['domain'] or '-'} | {item['type']} | {item['format'] or '-'} | {item['source']} | {secret} |"
         )
     lines.extend(["", "## Hosts", "", "| ID | IP | Hostname | Domain | OS |", "|---:|---|---|---|---|"])
     for item in data["hosts"]:
@@ -400,7 +420,7 @@ def env_exports() -> Iterable[tuple[str, str]]:
         selected_cred = next((c for c in creds if c.id == cfg.selected_cred_id), creds[-1])
         yield ("NIHIL_USER", selected_cred.username)
         if selected_cred.secret:
-            if selected_cred.cred_type == "ntlm":
+            if selected_cred.cred_type in {"ntlm", "hash"} or selected_cred.secret_format in {"ntlm", "lm", "rc4"}:
                 yield ("NIHIL_HASH", selected_cred.secret)
             else:
                 yield ("NIHIL_PASS", selected_cred.secret)

@@ -26,7 +26,14 @@ from nihil_history.services import (
     hosts_set,
     hosts_update,
 )
-from nihil_history.validators import ALLOWED_CRED_TYPES, ALLOWED_PROTOCOLS, ALLOWED_STATUS, CREDS_TYPE_ALIASES
+from nihil_history.validators import (
+    ALLOWED_CRED_TYPES,
+    ALLOWED_PROTOCOLS,
+    ALLOWED_STATUS,
+    CREDS_TYPE_ALIASES,
+    KNOWN_SECRET_FORMATS,
+    SECRET_FORMAT_ALIASES,
+)
 
 
 @dataclass(slots=True)
@@ -148,8 +155,8 @@ class NihilHistoryTUI(App[None]):
             aliases_hint = ", ".join(f"{k}->{v}" for k, v in sorted(CREDS_TYPE_ALIASES.items()))
             self.push_screen(
                 QuickInputScreen(
-                    f"Add credential: username,secret,domain,type (h for list, aliases: {aliases_hint})",
-                    "admin,P@ss,ACME.LOCAL,password",
+                    f"Add credential: username,secret,domain,type,format (h for list, aliases: {aliases_hint})",
+                    "admin,P@ss,ACME.LOCAL,password,ntlm",
                 ),
                 callback=self._on_add_cred,
             )
@@ -196,9 +203,12 @@ class NihilHistoryTUI(App[None]):
             selected = self._selected_cred()
             if selected is None:
                 return
-            default = f"{selected.username},{selected.secret or ''},{selected.domain or ''},{selected.cred_type}"
+            default = (
+                f"{selected.username},{selected.secret or ''},{selected.domain or ''},"
+                f"{selected.cred_type},{selected.secret_format or ''}"
+            )
             self.push_screen(
-                QuickInputScreen("Edit credential: username,secret,domain,type", default),
+                QuickInputScreen("Edit credential: username,secret,domain,type,format", default),
                 callback=lambda raw: self._on_edit_cred(raw, selected.id),
             )
         elif active == "hosts":
@@ -253,10 +263,12 @@ class NihilHistoryTUI(App[None]):
     def action_show_allowed_values(self) -> None:
         creds = ", ".join(sorted(ALLOWED_CRED_TYPES))
         aliases = ", ".join(f"{k}->{v}" for k, v in sorted(CREDS_TYPE_ALIASES.items()))
+        formats = ", ".join(sorted(KNOWN_SECRET_FORMATS))
+        format_aliases = ", ".join(f"{k}->{v}" for k, v in sorted(SECRET_FORMAT_ALIASES.items()))
         protocols = ", ".join(sorted(ALLOWED_PROTOCOLS))
         status = ", ".join(sorted(ALLOWED_STATUS))
         self._set_status(
-            f"cred_type: {creds} | aliases: {aliases} | protocol: {protocols} | status: {status}"
+            f"cred_type: {creds} | type aliases: {aliases} | format: {formats} | format aliases: {format_aliases} | protocol: {protocols} | status: {status}"
         )
 
     def action_show_details(self) -> None:
@@ -283,11 +295,17 @@ class NihilHistoryTUI(App[None]):
         if not raw:
             return
         try:
-            username, secret, domain, cred_type = self._parse_csv(raw, 4)
+            username, secret, domain, cred_type, secret_format = self._parse_csv(raw, 5)
             if not username:
                 self._set_status("Username is required.")
                 return
-            cred = creds_add(username=username, secret=secret or None, domain=domain or None, cred_type=cred_type or "password")
+            cred = creds_add(
+                username=username,
+                secret=secret or None,
+                domain=domain or None,
+                cred_type=cred_type or "password",
+                secret_format=secret_format or None,
+            )
             self._refresh_all(status_message=f"Credential added: id={cred.id} user={cred.username}")
         except MissingEngagementError:
             self._set_status("No active engagement. Use `nhi engagement init <name>` first.")
@@ -325,7 +343,7 @@ class NihilHistoryTUI(App[None]):
         if not raw:
             return
         try:
-            username, secret, domain, cred_type = self._parse_csv(raw, 4)
+            username, secret, domain, cred_type, secret_format = self._parse_csv(raw, 5)
             if not username:
                 self._set_status("Username is required.")
                 return
@@ -335,6 +353,7 @@ class NihilHistoryTUI(App[None]):
                 secret=secret or None,
                 domain=domain or None,
                 cred_type=cred_type or "password",
+                secret_format=secret_format or None,
             )
             self._refresh_all()
         except Exception as exc:
@@ -429,9 +448,10 @@ class NihilHistoryTUI(App[None]):
         table.add_column("Username")
         table.add_column("Domain")
         table.add_column("Type")
+        table.add_column("Format")
         table.add_column("Source")
         for cred in creds:
-            table.add_row(str(cred.id), cred.username, cred.domain or "-", cred.cred_type, cred.source)
+            table.add_row(str(cred.id), cred.username, cred.domain or "-", cred.cred_type, cred.secret_format or "-", cred.source)
 
     def _render_hosts(self, hosts: list) -> None:
         table = self.query_one("#hosts_table", DataTable)

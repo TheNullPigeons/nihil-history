@@ -16,7 +16,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 nhi engagement init acme-internal
-nhi creds add -u admin -p 'P@ssw0rd!' -d ACME.LOCAL
+nhi creds add -u admin -p 'P@ssw0rd!' -d ACME.LOCAL --type password --format ntlm
 nhi creds set --id 1
 nhi creds rm --id 2
 nhi hosts add --ip 10.10.10.10 --hostname DC01 --domain ACME.LOCAL
@@ -39,3 +39,4 @@ nhi export markdown -o report.md
 - Input validation is strict for IP/domain/protocol/status and returns actionable CLI errors.
 - Preferred short command is `nhi` (`nxh` remains as compatibility alias).
 - In TUI, press `h` to display allowed `cred_type`, protocol, status, and aliases.
+- Credentials now support both `--type` and `--format` (for example `--type hash --format rc4`).

@@ -99,9 +99,16 @@ def cmd_creds_add(
     secret: str | None = typer.Option(None, "--secret", "-p", help="Password/hash/token."),
     domain: str | None = typer.Option(None, "--domain", "-d"),
     cred_type: str = typer.Option("password", "--type"),
+    secret_format: str | None = typer.Option(None, "--format"),
 ) -> None:
     try:
-        cred = creds_add(username=username, secret=secret, domain=domain, cred_type=cred_type)
+        cred = creds_add(
+            username=username,
+            secret=secret,
+            domain=domain,
+            cred_type=cred_type,
+            secret_format=secret_format,
+        )
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
     except ValueError as exc:
@@ -121,9 +128,10 @@ def cmd_creds_list() -> None:
     table.add_column("Username")
     table.add_column("Domain")
     table.add_column("Type")
+    table.add_column("Format")
     table.add_column("Source")
     for cred in entries:
-        table.add_row(str(cred.id), cred.username, cred.domain or "-", cred.cred_type, cred.source)
+        table.add_row(str(cred.id), cred.username, cred.domain or "-", cred.cred_type, cred.secret_format or "-", cred.source)
     console.print(table)
 
 

@@ -36,6 +36,7 @@ class Credential(Base):
     secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cred_type: Mapped[str] = mapped_column(String(64), default="password", nullable=False)
+    secret_format: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String(64), default="manual", nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)

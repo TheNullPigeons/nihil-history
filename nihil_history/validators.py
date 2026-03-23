@@ -7,6 +7,10 @@ ALLOWED_PROTOCOLS = {"smb", "winrm", "rdp", "ssh", "ldap", "http", "https", "mss
 ALLOWED_STATUS = {"valid", "invalid", "unknown"}
 ALLOWED_CRED_TYPES = {
     "password",
+    "hash",
+    "key",
+    "ticket",
+    "secret",
     "ntlm",
     "kerberos",
     "aes",
@@ -21,14 +25,33 @@ ALLOWED_CRED_TYPES = {
     "otp_seed",
     "token",
 }
+KNOWN_SECRET_FORMATS = {
+    "ntlm",
+    "lm",
+    "rc4",
+    "aes128",
+    "aes256",
+    "md5",
+    "sha1",
+    "sha256",
+    "sha512",
+    "krb5ccache",
+    "jwt",
+    "pkcs12",
+    "pem",
+}
 CREDS_TYPE_ALIASES = {
+    "pass": "password",
+    "cert": "certificate",
+}
+SECRET_FORMAT_ALIASES = {
     "hash": "ntlm",
     "nthash": "ntlm",
     "ccache": "krb5ccache",
-    "cert": "certificate",
-    "jwt": "bearer",
-    "ssh": "ssh_key",
+    "pfx": "pkcs12",
+    "bearer": "jwt",
 }
+SECRET_FORMAT_RE = re.compile(r"^[A-Za-z0-9._:+-]{2,64}$")
 DOMAIN_RE = re.compile(r"^(?=.{1,255}$)([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$")
 
 
@@ -82,4 +105,20 @@ def validate_cred_type(value: str) -> str:
         allowed = ", ".join(sorted(ALLOWED_CRED_TYPES))
         aliases = ", ".join(f"{alias}->{target}" for alias, target in sorted(CREDS_TYPE_ALIASES.items()))
         raise ValueError(f"Invalid credential type '{clean}'. Allowed: {allowed}. Aliases: {aliases}")
+    return clean
+
+
+def validate_secret_format(value: str | None) -> str | None:
+    if value is None:
+        return None
+    clean = value.strip().lower()
+    if not clean:
+        return None
+    clean = SECRET_FORMAT_ALIASES.get(clean, clean)
+    if clean in KNOWN_SECRET_FORMATS:
+        return clean
+    if not SECRET_FORMAT_RE.fullmatch(clean):
+        known = ", ".join(sorted(KNOWN_SECRET_FORMATS))
+        raise ValueError(f"Invalid secret format '{clean}'. Known: {known}")
+    # Allow custom formats for edge cases while keeping sane characters.
     return clean
