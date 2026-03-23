@@ -26,6 +26,7 @@ from nihil_history.services import (
     hosts_set,
     hosts_update,
 )
+from nihil_history.validators import ALLOWED_CRED_TYPES, ALLOWED_PROTOCOLS, ALLOWED_STATUS, CREDS_TYPE_ALIASES
 
 
 @dataclass(slots=True)
@@ -96,6 +97,7 @@ class NihilHistoryTUI(App[None]):
         Binding("e", "edit_item", "Edit"),
         Binding("s", "set_item", "Set"),
         Binding("l", "link_item", "Link"),
+        Binding("h", "show_allowed_values", "Allowed values"),
         Binding("enter", "show_details", "Details"),
     ]
 
@@ -143,13 +145,17 @@ class NihilHistoryTUI(App[None]):
     def action_add_item(self) -> None:
         active = self.query_one(TabbedContent).active
         if active == "creds":
+            aliases_hint = ", ".join(f"{k}->{v}" for k, v in sorted(CREDS_TYPE_ALIASES.items()))
             self.push_screen(
-                QuickInputScreen("Add credential: username,secret,domain,type", "admin,P@ss,ACME.LOCAL,password"),
+                QuickInputScreen(
+                    f"Add credential: username,secret,domain,type (h for list, aliases: {aliases_hint})",
+                    "admin,P@ss,ACME.LOCAL,password",
+                ),
                 callback=self._on_add_cred,
             )
         elif active == "hosts":
             self.push_screen(
-                QuickInputScreen("Add host: ip,hostname,domain,os", "10.10.10.10,DC01,ACME.LOCAL,Windows Server"),
+                QuickInputScreen("Add host: ip,hostname,domain,os (h for formats)", "10.10.10.10,DC01,ACME.LOCAL,Windows Server"),
                 callback=self._on_add_host,
             )
         else:
@@ -234,9 +240,23 @@ class NihilHistoryTUI(App[None]):
         self._refresh_all()
 
     def action_link_item(self) -> None:
+        proto_hint = ",".join(sorted(ALLOWED_PROTOCOLS))
+        status_hint = ",".join(sorted(ALLOWED_STATUS))
         self.push_screen(
-            QuickInputScreen("Create link: cred_id,host_id,protocol,status", "1,2,smb,valid"),
+            QuickInputScreen(
+                f"Create link: cred_id,host_id,protocol,status (protocol={proto_hint} status={status_hint})",
+                "1,2,smb,valid",
+            ),
             callback=self._on_add_link,
+        )
+
+    def action_show_allowed_values(self) -> None:
+        creds = ", ".join(sorted(ALLOWED_CRED_TYPES))
+        aliases = ", ".join(f"{k}->{v}" for k, v in sorted(CREDS_TYPE_ALIASES.items()))
+        protocols = ", ".join(sorted(ALLOWED_PROTOCOLS))
+        status = ", ".join(sorted(ALLOWED_STATUS))
+        self._set_status(
+            f"cred_type: {creds} | aliases: {aliases} | protocol: {protocols} | status: {status}"
         )
 
     def action_show_details(self) -> None:
@@ -392,7 +412,7 @@ class NihilHistoryTUI(App[None]):
             self._set_status(
                 "Loaded: "
                 f"creds={len(creds)} hosts={len(hosts)} links={len(links)} | "
-                "Keys: 1/2/3 switch, a add, e edit, d delete, s set, l link, Enter details, r refresh, q quit"
+                "Keys: 1/2/3 switch, a add, e edit, d delete, s set, l link, h allowed values, Enter details, r refresh, q quit"
             )
 
     def _render_empty(self) -> None:

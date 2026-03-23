@@ -5,7 +5,30 @@ import re
 
 ALLOWED_PROTOCOLS = {"smb", "winrm", "rdp", "ssh", "ldap", "http", "https", "mssql", "wmi", "ftp"}
 ALLOWED_STATUS = {"valid", "invalid", "unknown"}
-ALLOWED_CRED_TYPES = {"password", "ntlm", "kerberos", "ssh_key", "token", "certificate"}
+ALLOWED_CRED_TYPES = {
+    "password",
+    "ntlm",
+    "kerberos",
+    "aes",
+    "krb5ccache",
+    "ssh_key",
+    "pfx",
+    "pem_key",
+    "certificate",
+    "api_key",
+    "bearer",
+    "cookie",
+    "otp_seed",
+    "token",
+}
+CREDS_TYPE_ALIASES = {
+    "hash": "ntlm",
+    "nthash": "ntlm",
+    "ccache": "krb5ccache",
+    "cert": "certificate",
+    "jwt": "bearer",
+    "ssh": "ssh_key",
+}
 DOMAIN_RE = re.compile(r"^(?=.{1,255}$)([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$")
 
 
@@ -54,7 +77,9 @@ def validate_status(value: str) -> str:
 
 def validate_cred_type(value: str) -> str:
     clean = require_non_empty(value, "type").lower()
+    clean = CREDS_TYPE_ALIASES.get(clean, clean)
     if clean not in ALLOWED_CRED_TYPES:
         allowed = ", ".join(sorted(ALLOWED_CRED_TYPES))
-        raise ValueError(f"Invalid credential type '{clean}'. Allowed: {allowed}")
+        aliases = ", ".join(f"{alias}->{target}" for alias, target in sorted(CREDS_TYPE_ALIASES.items()))
+        raise ValueError(f"Invalid credential type '{clean}'. Allowed: {allowed}. Aliases: {aliases}")
     return clean

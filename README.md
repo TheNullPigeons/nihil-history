@@ -38,3 +38,4 @@ nhi export markdown -o report.md
 - Optional at-rest secret encryption is available with `NIHIL_HISTORY_ENCRYPTION=1`.
 - Input validation is strict for IP/domain/protocol/status and returns actionable CLI errors.
 - Preferred short command is `nhi` (`nxh` remains as compatibility alias).
+- In TUI, press `h` to display allowed `cred_type`, protocol, status, and aliases.
