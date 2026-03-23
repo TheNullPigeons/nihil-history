@@ -267,8 +267,10 @@ class NihilHistoryTUI(App[None]):
             if not username:
                 self._set_status("Username is required.")
                 return
-            creds_add(username=username, secret=secret or None, domain=domain or None, cred_type=cred_type or "password")
-            self._refresh_all()
+            cred = creds_add(username=username, secret=secret or None, domain=domain or None, cred_type=cred_type or "password")
+            self._refresh_all(status_message=f"Credential added: id={cred.id} user={cred.username}")
+        except MissingEngagementError:
+            self._set_status("No active engagement. Use `nhi engagement init <name>` first.")
         except Exception as exc:
             self._set_status(f"Add credential failed: {exc}")
 
@@ -280,8 +282,10 @@ class NihilHistoryTUI(App[None]):
             if not ip:
                 self._set_status("IP is required.")
                 return
-            hosts_add(ip=ip, hostname=hostname or None, domain=domain or None, operating_system=os_name or None)
-            self._refresh_all()
+            host = hosts_add(ip=ip, hostname=hostname or None, domain=domain or None, operating_system=os_name or None)
+            self._refresh_all(status_message=f"Host added: id={host.id} ip={host.ip}")
+        except MissingEngagementError:
+            self._set_status("No active engagement. Use `nhi engagement init <name>` first.")
         except Exception as exc:
             self._set_status(f"Add host failed: {exc}")
 
@@ -290,8 +294,10 @@ class NihilHistoryTUI(App[None]):
             return
         try:
             cred_id, host_id, protocol, status = self._parse_csv(raw, 4)
-            access_link(cred_id=int(cred_id), host_id=int(host_id), protocol=protocol, status=status or "unknown")
-            self._refresh_all()
+            link = access_link(cred_id=int(cred_id), host_id=int(host_id), protocol=protocol, status=status or "unknown")
+            self._refresh_all(status_message=f"Access link added: id={link.id}")
+        except MissingEngagementError:
+            self._set_status("No active engagement. Use `nhi engagement init <name>` first.")
         except Exception as exc:
             self._set_status(f"Create link failed: {exc}")
 
@@ -364,7 +370,7 @@ class NihilHistoryTUI(App[None]):
         except Exception as exc:
             self._set_status(f"Delete failed: {exc}")
 
-    def _refresh_all(self) -> None:
+    def _refresh_all(self, status_message: str | None = None) -> None:
         try:
             creds = creds_list()
             hosts = hosts_list()
@@ -380,11 +386,14 @@ class NihilHistoryTUI(App[None]):
         self._render_creds(creds)
         self._render_hosts(hosts)
         self._render_matrix(links)
-        self._set_status(
-            "Loaded: "
-            f"creds={len(creds)} hosts={len(hosts)} links={len(links)} | "
-            "Keys: 1/2/3 switch, a add, e edit, d delete, s set, l link, Enter details, r refresh, q quit"
-        )
+        if status_message:
+            self._set_status(status_message)
+        else:
+            self._set_status(
+                "Loaded: "
+                f"creds={len(creds)} hosts={len(hosts)} links={len(links)} | "
+                "Keys: 1/2/3 switch, a add, e edit, d delete, s set, l link, Enter details, r refresh, q quit"
+            )
 
     def _render_empty(self) -> None:
         for table_id in ("creds_table", "hosts_table", "matrix_table"):
