@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Tooling caches/reports
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runtime/test data
+.nh-test/
+.nh-v3/
+.nihil-history/
+*.db
+*.sqlite3
+secret.key
+report.json
+report.md
+sample.xml

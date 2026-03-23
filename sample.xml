@@ -1,2 +1,0 @@
-<?xml version="1.0"?>
-<nmaprun><host><address addr="10.10.10.20" addrtype="ipv4"/><hostnames><hostname name="WS01"/></hostnames><os><osmatch name="Windows 11"/></os></host></nmaprun>
