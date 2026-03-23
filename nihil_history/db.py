@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from importlib import resources
 
 from alembic import command
 from alembic.config import Config
@@ -19,10 +20,11 @@ def get_engine():
 
 def init_db() -> None:
     cfg = load_config()
-    project_root = Path(__file__).resolve().parent.parent
+    migration_dir = resources.files("nihil_history").joinpath("alembic")
 
     def _run(db_path: Path) -> None:
-        alembic_cfg = Config(str(project_root / "alembic.ini"))
+        alembic_cfg = Config()
+        alembic_cfg.set_main_option("script_location", str(migration_dir))
         alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
         engine = create_engine(f"sqlite:///{db_path}", future=True)
         db_inspector = inspect(engine)

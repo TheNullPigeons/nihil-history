@@ -15,21 +15,21 @@ It stores and links:
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-nxh engagement init acme-internal
-nxh creds add -u admin -p 'P@ssw0rd!' -d ACME.LOCAL
-nxh creds set --id 1
-nxh creds rm --id 2
-nxh hosts add --ip 10.10.10.10 --hostname DC01 --domain ACME.LOCAL
-nxh hosts set --id 1
-nxh hosts rm --id 2
-nxh access link --cred-id 1 --host-id 1 --protocol smb --status valid
-nxh access matrix
-nxh access rm --id 3
-nxh hosts import-nmap -f scan.xml
-nxh env print --shell bash
-nxh tui
-nxh export json -o report.json
-nxh export markdown -o report.md
+nhi engagement init acme-internal
+nhi creds add -u admin -p 'P@ssw0rd!' -d ACME.LOCAL
+nhi creds set --id 1
+nhi creds rm --id 2
+nhi hosts add --ip 10.10.10.10 --hostname DC01 --domain ACME.LOCAL
+nhi hosts set --id 1
+nhi hosts rm --id 2
+nhi access link --cred-id 1 --host-id 1 --protocol smb --status valid
+nhi access matrix
+nhi access rm --id 3
+nhi hosts import-nmap -f scan.xml
+nhi env print --shell bash
+nhi tui
+nhi export json -o report.json
+nhi export markdown -o report.md
 ```
 
 ## Notes
@@ -37,3 +37,4 @@ nxh export markdown -o report.md
 - Database schema is managed via Alembic migrations (`alembic/versions`).
 - Optional at-rest secret encryption is available with `NIHIL_HISTORY_ENCRYPTION=1`.
 - Input validation is strict for IP/domain/protocol/status and returns actionable CLI errors.
+- Preferred short command is `nhi` (`nxh` remains as compatibility alias).

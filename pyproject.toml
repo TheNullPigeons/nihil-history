@@ -22,7 +22,7 @@ license = "MIT"
 
 [project.scripts]
 nihil-history = "nihil_history.cli:app"
-nxh = "nihil_history.cli:app"
+nhi = "nihil_history.cli:app"
 
 [project.optional-dependencies]
 dev = [
@@ -31,3 +31,6 @@ dev = [
 
 [tool.setuptools]
 packages = ["nihil_history"]
+
+[tool.setuptools.package-data]
+nihil_history = ["alembic/*.mako", "alembic/versions/*.py"]

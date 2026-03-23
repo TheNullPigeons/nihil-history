@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import typer
 from rich.console import Console
@@ -50,6 +51,9 @@ def _handle_missing_engagement(exc: MissingEngagementError) -> None:
 
 @app.callback()
 def main() -> None:
+    binary_name = Path(sys.argv[0]).name
+    if binary_name == "nxh":
+        console.print("[yellow]Deprecated alias:[/yellow] use `nhi` instead of `nxh`.")
     init_db()
 
 
