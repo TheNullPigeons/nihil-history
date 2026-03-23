@@ -29,8 +29,8 @@ dev = [
     "pytest>=8.0.0",
 ]
 
-[tool.setuptools]
-packages = ["nihil_history"]
+[tool.setuptools.packages.find]
+include = ["nihil_history*"]
 
 [tool.setuptools.package-data]
-nihil_history = ["alembic/*.mako", "alembic/versions/*.py"]
+nihil_history = ["alembic/*.py", "alembic/*.mako", "alembic/versions/*.py"]
