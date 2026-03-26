@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nihil-history"
-version = "0.1.0"
+version = "1.0.0"
 description = "Engagement-centric offensive history and access graph tool."
 readme = "README.md"
 requires-python = ">=3.12"
