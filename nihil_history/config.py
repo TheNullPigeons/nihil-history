@@ -14,7 +14,12 @@ class AppConfig:
     current_engagement: str | None = None
     selected_cred_id: int | None = None
     selected_host_id: int | None = None
+    selected_role_hosts: dict = None  # role (uppercase) -> host_id
     encryption_enabled: bool = False
+
+    def __post_init__(self):
+        if self.selected_role_hosts is None:
+            object.__setattr__(self, "selected_role_hosts", {})
 
 
 def _fallback_home() -> Path:
@@ -50,6 +55,10 @@ def config_path() -> Path:
     return ensure_home() / "config.json"
 
 
+def env_file_path() -> Path:
+    return ensure_home() / "env.sh"
+
+
 def key_path() -> Path:
     return ensure_home() / "secret.key"
 
@@ -81,12 +90,14 @@ def load_config() -> AppConfig:
     current_engagement = raw.get("current_engagement")
     selected_cred_id = raw.get("selected_cred_id")
     selected_host_id = raw.get("selected_host_id")
+    selected_role_hosts = raw.get("selected_role_hosts") or {}
     encryption_enabled = bool(raw.get("encryption_enabled", os.environ.get("NIHIL_HISTORY_ENCRYPTION", "0") == "1"))
     return AppConfig(
         db_path=db_path,
         current_engagement=current_engagement,
         selected_cred_id=selected_cred_id,
         selected_host_id=selected_host_id,
+        selected_role_hosts=selected_role_hosts,
         encryption_enabled=encryption_enabled,
     )
 
@@ -98,6 +109,7 @@ def save_config(config: AppConfig) -> None:
         "current_engagement": config.current_engagement,
         "selected_cred_id": config.selected_cred_id,
         "selected_host_id": config.selected_host_id,
+        "selected_role_hosts": config.selected_role_hosts,
         "encryption_enabled": config.encryption_enabled,
     }
     try:

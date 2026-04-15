@@ -5,18 +5,15 @@ import json
 
 from sqlalchemy import select
 
-from nihil_history.config import key_path, load_config, save_config
+from nihil_history.config import env_file_path, key_path, load_config, save_config
 from nihil_history.crypto import decrypt_secret, encrypt_secret, load_or_create_key
 from nihil_history.db import get_session, init_db
 from nihil_history.models import AccessLink, Credential, Engagement, Host
 from nihil_history.validators import (
-    validate_cred_type,
     validate_domain,
     validate_ip,
     validate_protocol,
-    validate_secret_format,
     validate_status,
-    require_non_empty,
 )
 
 
@@ -52,6 +49,10 @@ def engagement_init(name: str) -> Engagement:
             session.refresh(existing)
     cfg.current_engagement = name
     save_config(cfg)
+    try:
+        write_env_file()
+    except Exception:
+        pass
     return existing
 
 
@@ -64,6 +65,10 @@ def engagement_use(name: str) -> Engagement:
     cfg = load_config()
     cfg.current_engagement = name
     save_config(cfg)
+    try:
+        write_env_file()
+    except Exception:
+        pass
     return existing
 
 
@@ -97,44 +102,43 @@ def _decrypted_secret(secret: str | None) -> str | None:
     return decrypt_secret(secret, key)
 
 
-def _materialize_credential_secret(entry: Credential) -> Credential:
+def _materialize_credential_secrets(entry: Credential) -> Credential:
+    entry.password = _decrypted_secret(entry.password)
+    entry.hash = _decrypted_secret(entry.hash)
     entry.secret = _decrypted_secret(entry.secret)
     return entry
 
 
 def creds_add(
-    username: str,
+    username: str | None,
+    password: str | None,
+    hash: str | None,
     secret: str | None,
     domain: str | None,
-    cred_type: str,
-    secret_format: str | None = None,
     source: str = "manual",
 ) -> Credential:
     init_db()
-    username = require_non_empty(username, "username")
     domain = validate_domain(domain)
-    cred_type = validate_cred_type(cred_type)
-    secret_format = validate_secret_format(secret_format)
     with get_session() as session:
         cred = Credential(
             engagement_id=_engagement_id(),
-            username=username,
+            username=username or None,
+            password=_normalized_secret_for_storage(password),
+            hash=_normalized_secret_for_storage(hash),
             secret=_normalized_secret_for_storage(secret),
             domain=domain,
-            cred_type=cred_type,
-            secret_format=secret_format,
             source=source,
         )
         session.add(cred)
         session.commit()
         session.refresh(cred)
-        return _materialize_credential_secret(cred)
+        return _materialize_credential_secrets(cred)
 
 
 def creds_list() -> list[Credential]:
     with get_session() as session:
         rows = list(session.scalars(select(Credential).where(Credential.engagement_id == _engagement_id()).order_by(Credential.id)).all())
-        return [_materialize_credential_secret(row) for row in rows]
+        return [_materialize_credential_secrets(row) for row in rows]
 
 
 def creds_set(cred_id: int) -> Credential:
@@ -146,6 +150,10 @@ def creds_set(cred_id: int) -> Credential:
     cfg = load_config()
     cfg.selected_cred_id = cred_id
     save_config(cfg)
+    try:
+        write_env_file()
+    except Exception:
+        pass
     return cred
 
 
@@ -168,34 +176,31 @@ def creds_remove(cred_id: int) -> None:
 
 def creds_update(
     cred_id: int,
-    username: str,
+    username: str | None,
+    password: str | None,
+    hash: str | None,
     secret: str | None,
     domain: str | None,
-    cred_type: str,
-    secret_format: str | None = None,
 ) -> Credential:
     eid = _engagement_id()
-    username = require_non_empty(username, "username")
     domain = validate_domain(domain)
-    cred_type = validate_cred_type(cred_type)
-    secret_format = validate_secret_format(secret_format)
     with get_session() as session:
         cred = session.scalar(select(Credential).where(Credential.id == cred_id, Credential.engagement_id == eid))
         if cred is None:
             raise ValueError(f"Credential {cred_id} not found in active engagement.")
-        cred.username = username
+        cred.username = username or None
+        cred.password = _normalized_secret_for_storage(password)
+        cred.hash = _normalized_secret_for_storage(hash)
         cred.secret = _normalized_secret_for_storage(secret)
         cred.domain = domain
-        cred.cred_type = cred_type
-        cred.secret_format = secret_format
         session.commit()
         session.refresh(cred)
-        return _materialize_credential_secret(cred)
+        return _materialize_credential_secrets(cred)
 
 
-def hosts_add(ip: str, hostname: str | None, domain: str | None, operating_system: str | None, source: str = "manual") -> Host:
+def hosts_add(ip: str | None, hostname: str | None, domain: str | None, operating_system: str | None, role: str | None = None, source: str = "manual") -> Host:
     init_db()
-    ip = validate_ip(ip)
+    ip = validate_ip(ip) if ip else None
     domain = validate_domain(domain)
     with get_session() as session:
         host = Host(
@@ -204,6 +209,7 @@ def hosts_add(ip: str, hostname: str | None, domain: str | None, operating_syste
             hostname=hostname,
             domain=domain,
             operating_system=operating_system,
+            role=role.upper() if role else None,
             note=f"source={source}",
         )
         session.add(host)
@@ -225,7 +231,13 @@ def hosts_set(host_id: int) -> Host:
             raise ValueError(f"Host {host_id} not found in active engagement.")
     cfg = load_config()
     cfg.selected_host_id = host_id
+    if host.role:
+        cfg.selected_role_hosts[host.role.upper()] = host_id
     save_config(cfg)
+    try:
+        write_env_file()
+    except Exception:
+        pass
     return host
 
 
@@ -246,9 +258,9 @@ def hosts_remove(host_id: int) -> None:
         save_config(cfg)
 
 
-def hosts_update(host_id: int, ip: str, hostname: str | None, domain: str | None, operating_system: str | None) -> Host:
+def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str | None, operating_system: str | None, role: str | None = None) -> Host:
     eid = _engagement_id()
-    ip = validate_ip(ip)
+    ip = validate_ip(ip) if ip else None
     domain = validate_domain(domain)
     with get_session() as session:
         host = session.scalar(select(Host).where(Host.id == host_id, Host.engagement_id == eid))
@@ -258,6 +270,7 @@ def hosts_update(host_id: int, ip: str, hostname: str | None, domain: str | None
         host.hostname = hostname
         host.domain = domain
         host.operating_system = operating_system
+        host.role = role.upper() if role else None
         session.commit()
         session.refresh(host)
         return host
@@ -348,10 +361,10 @@ def report_payload(include_secrets: bool = False) -> dict:
                 "id": c.id,
                 "username": c.username,
                 "domain": c.domain,
-                "type": c.cred_type,
-                "format": c.secret_format,
-                "source": c.source,
+                "password": c.password if include_secrets else None,
+                "hash": c.hash if include_secrets else None,
                 "secret": c.secret if include_secrets else None,
+                "source": c.source,
             }
             for c in creds
         ],
@@ -390,13 +403,15 @@ def export_report_markdown(include_secrets: bool = False) -> str:
         "",
         "## Credentials",
         "",
-        "| ID | Username | Domain | Type | Format | Source | Secret |",
+        "| ID | Username | Domain | Password | Hash | Secret | Source |",
         "|---:|---|---|---|---|---|---|",
     ]
     for item in data["credentials"]:
+        password = item["password"] if include_secrets and item["password"] else "-"
+        hash_ = item["hash"] if include_secrets and item["hash"] else "-"
         secret = item["secret"] if include_secrets and item["secret"] else "-"
         lines.append(
-            f"| {item['id']} | {item['username']} | {item['domain'] or '-'} | {item['type']} | {item['format'] or '-'} | {item['source']} | {secret} |"
+            f"| {item['id']} | {item['username'] or '-'} | {item['domain'] or '-'} | {password} | {hash_} | {secret} | {item['source']} |"
         )
     lines.extend(["", "## Hosts", "", "| ID | IP | Hostname | Domain | OS |", "|---:|---|---|---|---|"])
     for item in data["hosts"]:
@@ -411,6 +426,21 @@ def export_report_markdown(include_secrets: bool = False) -> str:
     return "\n".join(lines)
 
 
+def write_env_file(shell: str = "zsh") -> Path:
+    """Write current env exports to ~/.nihil-history/env.sh and return the path."""
+    rows = list(env_exports())
+    path = env_file_path()
+    lines = [f"# nihil-history env — auto-generated, do not edit\n"]
+    for key, value in rows:
+        escaped = value.replace('"', '\\"')
+        if shell == "fish":
+            lines.append(f'set -gx {key} "{escaped}"\n')
+        else:
+            lines.append(f'export {key}="{escaped}"\n')
+    path.write_text("".join(lines), encoding="utf-8")
+    return path
+
+
 def env_exports() -> Iterable[tuple[str, str]]:
     creds = creds_list()
     hosts = hosts_list()
@@ -418,16 +448,27 @@ def env_exports() -> Iterable[tuple[str, str]]:
 
     if creds:
         selected_cred = next((c for c in creds if c.id == cfg.selected_cred_id), creds[-1])
-        yield ("NIHIL_USER", selected_cred.username)
-        if selected_cred.secret:
-            if selected_cred.cred_type in {"ntlm", "hash"} or selected_cred.secret_format in {"ntlm", "lm", "rc4"}:
-                yield ("NIHIL_HASH", selected_cred.secret)
-            else:
-                yield ("NIHIL_PASS", selected_cred.secret)
+        if selected_cred.username:
+            yield ("USER", selected_cred.username)
+        if selected_cred.password:
+            yield ("PASSWORD", selected_cred.password)
+        if selected_cred.hash:
+            yield ("NT_HASH", selected_cred.hash)
         if selected_cred.domain:
-            yield ("NIHIL_DOMAIN", selected_cred.domain)
+            yield ("DOMAIN", selected_cred.domain)
     if hosts:
-        selected_host = next((h for h in hosts if h.id == cfg.selected_host_id), hosts[-1])
-        yield ("NIHIL_TARGET", selected_host.ip)
-        if selected_host.hostname:
-            yield ("NIHIL_HOSTNAME", selected_host.hostname)
+        hosts_by_id = {h.id: h for h in hosts}
+        selected_host = hosts_by_id.get(cfg.selected_host_id) or hosts[-1]
+        if selected_host.ip:
+            yield ("TARGET", selected_host.ip)
+            yield ("IP", selected_host.ip)
+        # Role-specific vars — each role maintains its own selected host
+        for role_upper, host_id in (cfg.selected_role_hosts or {}).items():
+            host = hosts_by_id.get(host_id)
+            if host is None:
+                continue
+            if role_upper == "DC":
+                if host.ip:
+                    yield ("DC_IP", host.ip)
+                if host.hostname:
+                    yield ("DC_HOST", host.hostname)

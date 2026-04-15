@@ -22,6 +22,7 @@ from nihil_history.services import (
     engagement_list,
     engagement_use,
     env_exports,
+    write_env_file,
     export_report_json,
     export_report_markdown,
     hosts_add,
@@ -95,26 +96,26 @@ def cmd_engagement_list() -> None:
 
 @creds_app.command("add")
 def cmd_creds_add(
-    username: str = typer.Option(..., "--username", "-u"),
-    secret: str | None = typer.Option(None, "--secret", "-p", help="Password/hash/token."),
+    username: str | None = typer.Option(None, "--username", "-u"),
+    password: str | None = typer.Option(None, "--password", "-p"),
+    hash: str | None = typer.Option(None, "--hash"),
+    secret: str | None = typer.Option(None, "--secret", "-s"),
     domain: str | None = typer.Option(None, "--domain", "-d"),
-    cred_type: str = typer.Option("password", "--type"),
-    secret_format: str | None = typer.Option(None, "--format"),
 ) -> None:
     try:
         cred = creds_add(
             username=username,
+            password=password,
+            hash=hash,
             secret=secret,
             domain=domain,
-            cred_type=cred_type,
-            secret_format=secret_format,
         )
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
-    console.print(f"[green]Credential added:[/green] id={cred.id} user={cred.username}")
+    console.print(f"[green]Credential added:[/green] id={cred.id} user={cred.username or '-'}")
 
 
 @creds_app.command("list")
@@ -127,11 +128,20 @@ def cmd_creds_list() -> None:
     table.add_column("ID")
     table.add_column("Username")
     table.add_column("Domain")
-    table.add_column("Type")
-    table.add_column("Format")
+    table.add_column("Password")
+    table.add_column("Hash")
+    table.add_column("Secret")
     table.add_column("Source")
     for cred in entries:
-        table.add_row(str(cred.id), cred.username, cred.domain or "-", cred.cred_type, cred.secret_format or "-", cred.source)
+        table.add_row(
+            str(cred.id),
+            cred.username or "-",
+            cred.domain or "-",
+            "***" if cred.password else "-",
+            "***" if cred.hash else "-",
+            "***" if cred.secret else "-",
+            cred.source,
+        )
     console.print(table)
 
 
@@ -161,13 +171,14 @@ def cmd_creds_rm(cred_id: int = typer.Option(..., "--id")) -> None:
 
 @hosts_app.command("add")
 def cmd_hosts_add(
-    ip: str = typer.Option(..., "--ip"),
+    ip: str | None = typer.Option(None, "--ip"),
     hostname: str | None = typer.Option(None, "--hostname"),
     domain: str | None = typer.Option(None, "--domain"),
     os_name: str | None = typer.Option(None, "--os"),
+    role: str | None = typer.Option(None, "--role"),
 ) -> None:
     try:
-        host = hosts_add(ip=ip, hostname=hostname, domain=domain, operating_system=os_name)
+        host = hosts_add(ip=ip, hostname=hostname, domain=domain, operating_system=os_name, role=role)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
     except ValueError as exc:
@@ -188,8 +199,9 @@ def cmd_hosts_list() -> None:
     table.add_column("Hostname")
     table.add_column("Domain")
     table.add_column("OS")
+    table.add_column("Role")
     for host in entries:
-        table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-")
+        table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-", host.role or "-")
     console.print(table)
 
 
@@ -311,6 +323,20 @@ def cmd_env_print(shell: str = typer.Option("bash", "--shell")) -> None:
             console.print(f'export {key}="{escaped}"')
 
 
+@env_app.command("export")
+def cmd_env_export(
+    shell: str = typer.Option("zsh", "--shell"),
+) -> None:
+    """Write env exports to ~/.nihil-history/env.sh."""
+    try:
+        path = write_env_file(shell=shell)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+        return
+    console.print(f"[green]Written:[/green] {path}")
+    console.print(f"[dim]Add to ~/.zshrc:[/dim]  source {path}")
+
+
 @sync_app.command("nxc")
 def cmd_sync_nxc(file: str = typer.Option(..., "--file", "-f")) -> None:
     try:
@@ -327,6 +353,11 @@ def cmd_sync_nxc(file: str = typer.Option(..., "--file", "-f")) -> None:
 
 @app.command("tui")
 def cmd_tui() -> None:
+    NihilHistoryTUI().run()
+
+
+def tui_main() -> None:
+    init_db()
     NihilHistoryTUI().run()
 
 

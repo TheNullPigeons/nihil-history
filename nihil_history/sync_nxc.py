@@ -10,9 +10,9 @@ NXC_SUCCESS_RE = re.compile(
 )
 
 
-def _cred_exists(username: str, domain: str | None, secret: str) -> int | None:
+def _cred_exists(username: str, domain: str | None, password: str) -> int | None:
     for cred in creds_list():
-        if cred.username == username and cred.domain == domain and (cred.secret or "") == secret:
+        if cred.username == username and cred.domain == domain and (cred.password or "") == password:
             return cred.id
     return None
 
@@ -42,9 +42,9 @@ def import_nxc_text(path: str) -> dict[str, int]:
         username = match.group("user")
         secret = match.group("secret")
 
-        cred_id = _cred_exists(username=username, domain=domain, secret=secret)
+        cred_id = _cred_exists(username=username, domain=domain, password=secret)
         if cred_id is None:
-            cred = creds_add(username=username, secret=secret, domain=domain, cred_type="password", source="nxc")
+            cred = creds_add(username=username, password=secret, hash=None, secret=None, domain=domain, source="nxc")
             cred_id = cred.id
             added_creds += 1
 

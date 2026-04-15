@@ -9,6 +9,7 @@ from textual.containers import Container
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static, TabPane, TabbedContent
 
+from nihil_history.config import load_config
 from nihil_history.services import (
     MissingEngagementError,
     access_link,
@@ -20,6 +21,8 @@ from nihil_history.services import (
     creds_remove,
     creds_set,
     creds_update,
+    engagement_init,
+    engagement_list,
     hosts_add,
     hosts_list,
     hosts_remove,
@@ -27,12 +30,8 @@ from nihil_history.services import (
     hosts_update,
 )
 from nihil_history.validators import (
-    ALLOWED_CRED_TYPES,
     ALLOWED_PROTOCOLS,
     ALLOWED_STATUS,
-    CREDS_TYPE_ALIASES,
-    KNOWN_SECRET_FORMATS,
-    SECRET_FORMAT_ALIASES,
 )
 
 
@@ -90,12 +89,136 @@ class QuickInputScreen(ModalScreen[str | None]):
         self.dismiss(event.value.strip() or None)
 
 
+class MultiFieldScreen(ModalScreen[list[str] | None]):
+    CSS = """
+    MultiFieldScreen {
+      align: center middle;
+    }
+    #dialog {
+      width: 80;
+      height: auto;
+      border: round $accent;
+      padding: 1;
+      background: $panel;
+    }
+    .field-label {
+      color: $text-muted;
+      margin-top: 1;
+    }
+    #row {
+      height: auto;
+      margin-top: 1;
+    }
+    Button {
+      margin-right: 1;
+    }
+    """
+
+    def __init__(self, title: str, fields: list[tuple[str, str, str]]) -> None:
+        """fields: list of (label, placeholder, default_value)"""
+        super().__init__()
+        self._title = title
+        self.fields = fields
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Label(self._title)
+            for i, (label, placeholder, default) in enumerate(self.fields):
+                yield Label(label, classes="field-label")
+                yield Input(placeholder=placeholder, value=default, id=f"field_{i}")
+            with Container(id="row"):
+                yield Button("OK", variant="success", id="ok")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#field_0", Input).focus()
+
+    @on(Button.Pressed, "#ok")
+    def _ok(self) -> None:
+        self.dismiss(self._collect())
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        current_idx = int(event.input.id.split("_")[1])
+        next_idx = current_idx + 1
+        if next_idx < len(self.fields):
+            self.query_one(f"#field_{next_idx}", Input).focus()
+        else:
+            self.dismiss(self._collect())
+
+    def _collect(self) -> list[str]:
+        return [
+            self.query_one(f"#field_{i}", Input).value.strip()
+            for i in range(len(self.fields))
+        ]
+
+
+class EngagementScreen(ModalScreen[str | None]):
+    CSS = """
+    EngagementScreen {
+      align: center middle;
+    }
+    #dialog {
+      width: 80;
+      height: auto;
+      border: round $accent;
+      padding: 1;
+      background: $panel;
+    }
+    #existing {
+      color: $text-muted;
+      margin-bottom: 1;
+    }
+    #row {
+      height: auto;
+      margin-top: 1;
+    }
+    Button {
+      margin-right: 1;
+    }
+    """
+
+    def __init__(self, existing: list[str]) -> None:
+        super().__init__()
+        self.existing = existing
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Label("Select or create an engagement")
+            if self.existing:
+                yield Label(f"Existing: {', '.join(self.existing)}", id="existing")
+            yield Input(placeholder="engagement-name", id="name")
+            with Container(id="row"):
+                yield Button("OK", variant="success", id="ok")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#name", Input).focus()
+
+    @on(Button.Pressed, "#ok")
+    def _ok(self) -> None:
+        value = self.query_one("#name", Input).value.strip()
+        self.dismiss(value or None)
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        value = event.value.strip()
+        self.dismiss(value or None)
+
+
 class NihilHistoryTUI(App[None]):
     TITLE = "nxh tui"
     SUB_TITLE = "Credentials, hosts, and access matrix"
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
+        Binding("ctrl+e", "engagement", "Engagement"),
         Binding("1", "tab_creds", "Credentials"),
         Binding("2", "tab_hosts", "Hosts"),
         Binding("3", "tab_matrix", "Matrix"),
@@ -103,9 +226,16 @@ class NihilHistoryTUI(App[None]):
         Binding("d", "delete_item", "Delete"),
         Binding("e", "edit_item", "Edit"),
         Binding("s", "set_item", "Set"),
-        Binding("l", "link_item", "Link"),
-        Binding("h", "show_allowed_values", "Allowed values"),
-        Binding("enter", "show_details", "Details"),
+        Binding("L", "link_item", "Link"),
+        Binding("?", "show_allowed_values", "?"),
+        Binding("enter", "show_details", "Set+Quit"),
+        Binding("j", "vi_down", "↓", show=False),
+        Binding("k", "vi_up", "↑", show=False),
+        Binding("g", "vi_top", "Top", show=False),
+        Binding("G", "vi_bottom", "Bottom", show=False),
+        Binding("h", "tab_prev", "◀", show=False),
+        Binding("l", "tab_next", "▶", show=False),
+        Binding("/", "search_open", "/", show=False),
     ]
 
     CSS = """
@@ -118,27 +248,66 @@ class NihilHistoryTUI(App[None]):
       color: $text-muted;
       margin-left: 1;
     }
+    #search_bar {
+      display: none;
+      height: 3;
+      border: solid $accent;
+    }
     """
 
     def compose(self) -> ComposeResult:
         self.state = SelectionState(creds=[], hosts=[], links=[])
+        self._vis_creds: list = []
+        self._vis_hosts: list = []
+        self._vis_links: list = []
+        self._search_query: str = ""
         yield Header()
         with Container():
             yield Static("Ready", id="status")
+            yield Input(id="search_bar", placeholder="/search...")
             with TabbedContent(initial="creds"):
                 with TabPane("Credentials", id="creds"):
-                    yield DataTable(id="creds_table")
+                    yield DataTable(id="creds_table", cursor_type="row")
                 with TabPane("Hosts", id="hosts"):
-                    yield DataTable(id="hosts_table")
+                    yield DataTable(id="hosts_table", cursor_type="row")
                 with TabPane("Access Matrix", id="matrix"):
-                    yield DataTable(id="matrix_table")
+                    yield DataTable(id="matrix_table", cursor_type="row")
         yield Footer()
 
     def on_mount(self) -> None:
-        self._refresh_all()
+        cfg = load_config()
+        if not cfg.current_engagement:
+            self._show_engagement_picker()
+        else:
+            self._refresh_all()
+            self.query_one("#creds_table", DataTable).focus()
 
     def action_refresh(self) -> None:
         self._refresh_all()
+
+    def action_engagement(self) -> None:
+        self._show_engagement_picker()
+
+    def _show_engagement_picker(self) -> None:
+        try:
+            existing = [e.name for e in engagement_list()]
+        except Exception:
+            existing = []
+        self.push_screen(EngagementScreen(existing), callback=self._on_engagement_selected)
+
+    def _on_engagement_selected(self, name: str | None) -> None:
+        if not name:
+            self._set_status("No engagement selected. Press 'g' to pick one.")
+            self._render_empty()
+            return
+        try:
+            engagement_init(name)
+            self._refresh_all(status_message=f"Engagement: {name}")
+            self.query_one("#creds_table", DataTable).focus()
+        except Exception as exc:
+            self._set_status(f"Engagement error: {exc}")
+
+    _TABS = ["creds", "hosts", "matrix"]
 
     def action_tab_creds(self) -> None:
         self.query_one(TabbedContent).active = "creds"
@@ -149,20 +318,50 @@ class NihilHistoryTUI(App[None]):
     def action_tab_matrix(self) -> None:
         self.query_one(TabbedContent).active = "matrix"
 
+    def action_tab_prev(self) -> None:
+        tc = self.query_one(TabbedContent)
+        idx = self._TABS.index(tc.active) if tc.active in self._TABS else 0
+        tc.active = self._TABS[(idx - 1) % len(self._TABS)]
+        self._focus_active_table()
+
+    def action_tab_next(self) -> None:
+        tc = self.query_one(TabbedContent)
+        idx = self._TABS.index(tc.active) if tc.active in self._TABS else 0
+        tc.active = self._TABS[(idx + 1) % len(self._TABS)]
+        self._focus_active_table()
+
+    def _focus_active_table(self) -> None:
+        if t := self._active_table():
+            t.focus()
+
     def action_add_item(self) -> None:
         active = self.query_one(TabbedContent).active
         if active == "creds":
-            aliases_hint = ", ".join(f"{k}->{v}" for k, v in sorted(CREDS_TYPE_ALIASES.items()))
             self.push_screen(
-                QuickInputScreen(
-                    f"Add credential: username,secret,domain,type,format (h for list, aliases: {aliases_hint})",
-                    "admin,P@ss,ACME.LOCAL,password,ntlm",
+                MultiFieldScreen(
+                    "Add credential",
+                    [
+                        ("Username", "admin", ""),
+                        ("Password", "P@ssw0rd", ""),
+                        ("Hash", "aad3b435b51404ee:...", ""),
+                        ("Secret", "token/key/...", ""),
+                        ("Domain", "ACME.LOCAL", ""),
+                    ],
                 ),
                 callback=self._on_add_cred,
             )
         elif active == "hosts":
             self.push_screen(
-                QuickInputScreen("Add host: ip,hostname,domain,os (h for formats)", "10.10.10.10,DC01,ACME.LOCAL,Windows Server"),
+                MultiFieldScreen(
+                    "Add host",
+                    [
+                        ("IP", "10.10.10.10", ""),
+                        ("Hostname", "DC01", ""),
+                        ("Domain", "ACME.LOCAL", ""),
+                        ("OS", "Windows Server 2022", ""),
+                        ("Role  [DC, WS, SRV, WEB, ...]", "DC", ""),
+                    ],
+                ),
                 callback=self._on_add_host,
             )
         else:
@@ -203,31 +402,53 @@ class NihilHistoryTUI(App[None]):
             selected = self._selected_cred()
             if selected is None:
                 return
-            default = (
-                f"{selected.username},{selected.secret or ''},{selected.domain or ''},"
-                f"{selected.cred_type},{selected.secret_format or ''}"
-            )
             self.push_screen(
-                QuickInputScreen("Edit credential: username,secret,domain,type,format", default),
-                callback=lambda raw: self._on_edit_cred(raw, selected.id),
+                MultiFieldScreen(
+                    "Edit credential",
+                    [
+                        ("Username", "admin", selected.username or ""),
+                        ("Password", "P@ssw0rd", selected.password or ""),
+                        ("Hash", "aad3b435b51404ee:...", selected.hash or ""),
+                        ("Secret", "token/key/...", selected.secret or ""),
+                        ("Domain", "ACME.LOCAL", selected.domain or ""),
+                    ],
+                ),
+                callback=lambda values: self._on_edit_cred(values, selected.id),
             )
         elif active == "hosts":
             selected = self._selected_host()
             if selected is None:
                 return
-            default = f"{selected.ip},{selected.hostname or ''},{selected.domain or ''},{selected.operating_system or ''}"
             self.push_screen(
-                QuickInputScreen("Edit host: ip,hostname,domain,os", default),
-                callback=lambda raw: self._on_edit_host(raw, selected.id),
+                MultiFieldScreen(
+                    "Edit host",
+                    [
+                        ("IP", "10.10.10.10", selected.ip or ""),
+                        ("Hostname", "DC01", selected.hostname or ""),
+                        ("Domain", "ACME.LOCAL", selected.domain or ""),
+                        ("OS", "Windows Server 2022", selected.operating_system or ""),
+                        ("Role  [DC, WS, SRV, WEB, ...]", "DC", selected.role or ""),
+                    ],
+                ),
+                callback=lambda values: self._on_edit_host(values, selected.id),
             )
         elif active == "matrix":
             selected = self._selected_link()
             if selected is None:
                 return
-            default = f"{selected.cred_id},{selected.host_id},{selected.protocol},{selected.status}"
+            proto_hint = ", ".join(sorted(ALLOWED_PROTOCOLS))
+            status_hint = ", ".join(sorted(ALLOWED_STATUS))
             self.push_screen(
-                QuickInputScreen("Edit link: cred_id,host_id,protocol,status", default),
-                callback=lambda raw: self._on_edit_link(raw, selected.id),
+                MultiFieldScreen(
+                    "Edit link",
+                    [
+                        ("Cred ID *", "1", str(selected.cred_id)),
+                        ("Host ID *", "2", str(selected.host_id)),
+                        (f"Protocol  [{proto_hint}]", "smb", selected.protocol),
+                        (f"Status  [{status_hint}]", "valid", selected.status),
+                    ],
+                ),
+                callback=lambda values: self._on_edit_link(values, selected.id),
             )
 
     def action_set_item(self) -> None:
@@ -250,88 +471,172 @@ class NihilHistoryTUI(App[None]):
         self._refresh_all()
 
     def action_link_item(self) -> None:
-        proto_hint = ",".join(sorted(ALLOWED_PROTOCOLS))
-        status_hint = ",".join(sorted(ALLOWED_STATUS))
+        proto_hint = ", ".join(sorted(ALLOWED_PROTOCOLS))
+        status_hint = ", ".join(sorted(ALLOWED_STATUS))
         self.push_screen(
-            QuickInputScreen(
-                f"Create link: cred_id,host_id,protocol,status (protocol={proto_hint} status={status_hint})",
-                "1,2,smb,valid",
+            MultiFieldScreen(
+                "Create access link",
+                [
+                    ("Cred ID *", "1", ""),
+                    ("Host ID *", "2", ""),
+                    (f"Protocol  [{proto_hint}]", "smb", "smb"),
+                    (f"Status  [{status_hint}]", "valid", "valid"),
+                ],
             ),
             callback=self._on_add_link,
         )
 
     def action_show_allowed_values(self) -> None:
-        creds = ", ".join(sorted(ALLOWED_CRED_TYPES))
-        aliases = ", ".join(f"{k}->{v}" for k, v in sorted(CREDS_TYPE_ALIASES.items()))
-        formats = ", ".join(sorted(KNOWN_SECRET_FORMATS))
-        format_aliases = ", ".join(f"{k}->{v}" for k, v in sorted(SECRET_FORMAT_ALIASES.items()))
         protocols = ", ".join(sorted(ALLOWED_PROTOCOLS))
         status = ", ".join(sorted(ALLOWED_STATUS))
-        self._set_status(
-            f"cred_type: {creds} | type aliases: {aliases} | format: {formats} | format aliases: {format_aliases} | protocol: {protocols} | status: {status}"
-        )
+        self._set_status(f"protocol: {protocols} | status: {status}")
+
+    def _active_table(self) -> DataTable | None:
+        active = self.query_one(TabbedContent).active
+        table_id = {"creds": "creds_table", "hosts": "hosts_table", "matrix": "matrix_table"}.get(active)
+        return self.query_one(f"#{table_id}", DataTable) if table_id else None
+
+    def action_vi_down(self) -> None:
+        if t := self._active_table():
+            t.focus()
+            t.move_cursor(row=min(t.cursor_row + 1, t.row_count - 1))
+
+    def action_vi_up(self) -> None:
+        if t := self._active_table():
+            t.focus()
+            t.move_cursor(row=max(t.cursor_row - 1, 0))
+
+    def action_vi_top(self) -> None:
+        if t := self._active_table():
+            t.focus()
+            t.move_cursor(row=0)
+
+    def action_vi_bottom(self) -> None:
+        if t := self._active_table():
+            t.focus()
+            t.move_cursor(row=max(t.row_count - 1, 0))
+
+    def action_search_open(self) -> None:
+        bar = self.query_one("#search_bar", Input)
+        bar.display = True
+        bar.focus()
+
+    def _close_search(self) -> None:
+        bar = self.query_one("#search_bar", Input)
+        bar.display = False
+        bar.value = ""
+        self._search_query = ""
+        self._apply_search()
+        if t := self._active_table():
+            t.focus()
+
+    def _apply_search(self) -> None:
+        q = self._search_query
+        if q:
+            creds = [c for c in self.state.creds if
+                     q in (c.username or "").lower() or
+                     q in (c.password or "").lower() or
+                     q in (c.hash or "").lower() or
+                     q in (c.secret or "").lower() or
+                     q in (c.domain or "").lower() or
+                     q in (c.source or "").lower()]
+            hosts = [h for h in self.state.hosts if
+                     q in (h.ip or "").lower() or
+                     q in (h.hostname or "").lower() or
+                     q in (h.domain or "").lower() or
+                     q in (h.role or "").lower()]
+            links = [lnk for lnk in self.state.links if
+                     q in lnk.protocol.lower() or
+                     q in lnk.status.lower()]
+        else:
+            creds = self.state.creds
+            hosts = self.state.hosts
+            links = self.state.links
+        self._render_creds(creds)
+        self._render_hosts(hosts)
+        self._render_matrix(links)
+
+    @on(Input.Changed, "#search_bar")
+    def _on_search_changed(self, event: Input.Changed) -> None:
+        self._search_query = event.value.lower()
+        self._apply_search()
+
+    @on(Input.Submitted, "#search_bar")
+    def _on_search_submitted(self, event: Input.Submitted) -> None:
+        self._search_query = event.value.lower()
+        self._apply_search()
+        self._close_search()
+
+    def on_key(self, event) -> None:
+        bar = self.query_one("#search_bar", Input)
+        if event.key == "escape" and bar.display and bar.has_focus:
+            self._close_search()
+            event.stop()
+
+    @on(DataTable.RowSelected)
+    def _on_row_selected(self, event: DataTable.RowSelected) -> None:
+        self.action_show_details()
 
     def action_show_details(self) -> None:
         active = self.query_one(TabbedContent).active
         if active == "creds":
             selected = self._selected_cred()
-            if selected:
-                self._set_status(f"cred id={selected.id} user={selected.username} type={selected.cred_type}")
+            if selected is None:
+                return
+            creds_set(selected.id)
+            self.exit()
         elif active == "hosts":
             selected = self._selected_host()
-            if selected:
-                self._set_status(f"host id={selected.id} ip={selected.ip} hostname={selected.hostname or '-'}")
+            if selected is None:
+                return
+            hosts_set(selected.id)
+            self.exit()
         else:
             selected = self._selected_link()
-            if selected:
-                self._set_status(
-                    f"link id={selected.id} cred={selected.cred_id} host={selected.host_id} {selected.protocol}/{selected.status}"
-                )
+            if selected is None:
+                return
+            self._set_status(
+                f"link id={selected.id} cred={selected.cred_id} host={selected.host_id} {selected.protocol}/{selected.status}"
+            )
 
     def _set_status(self, value: str) -> None:
         self.query_one("#status", Static).update(value)
 
-    def _on_add_cred(self, raw: str | None) -> None:
-        if not raw:
+    def _on_add_cred(self, values: list[str] | None) -> None:
+        if values is None:
             return
         try:
-            username, secret, domain, cred_type, secret_format = self._parse_csv(raw, 5)
-            if not username:
-                self._set_status("Username is required.")
-                return
+            username, password, hash_, secret, domain = values
             cred = creds_add(
-                username=username,
+                username=username or None,
+                password=password or None,
+                hash=hash_ or None,
                 secret=secret or None,
                 domain=domain or None,
-                cred_type=cred_type or "password",
-                secret_format=secret_format or None,
             )
-            self._refresh_all(status_message=f"Credential added: id={cred.id} user={cred.username}")
+            self._refresh_all(status_message=f"Credential added: id={cred.id} user={cred.username or '-'}")
         except MissingEngagementError:
-            self._set_status("No active engagement. Use `nhi engagement init <name>` first.")
+            self._set_status("No active engagement. Press 'g' to select one.")
         except Exception as exc:
             self._set_status(f"Add credential failed: {exc}")
 
-    def _on_add_host(self, raw: str | None) -> None:
-        if not raw:
+    def _on_add_host(self, values: list[str] | None) -> None:
+        if values is None:
             return
         try:
-            ip, hostname, domain, os_name = self._parse_csv(raw, 4)
-            if not ip:
-                self._set_status("IP is required.")
-                return
-            host = hosts_add(ip=ip, hostname=hostname or None, domain=domain or None, operating_system=os_name or None)
+            ip, hostname, domain, os_name, role = values
+            host = hosts_add(ip=ip or None, hostname=hostname or None, domain=domain or None, operating_system=os_name or None, role=role or None)
             self._refresh_all(status_message=f"Host added: id={host.id} ip={host.ip}")
         except MissingEngagementError:
             self._set_status("No active engagement. Use `nhi engagement init <name>` first.")
         except Exception as exc:
             self._set_status(f"Add host failed: {exc}")
 
-    def _on_add_link(self, raw: str | None) -> None:
-        if not raw:
+    def _on_add_link(self, values: list[str] | None) -> None:
+        if values is None:
             return
         try:
-            cred_id, host_id, protocol, status = self._parse_csv(raw, 4)
+            cred_id, host_id, protocol, status = values
             link = access_link(cred_id=int(cred_id), host_id=int(host_id), protocol=protocol, status=status or "unknown")
             self._refresh_all(status_message=f"Access link added: id={link.id}")
         except MissingEngagementError:
@@ -339,50 +644,45 @@ class NihilHistoryTUI(App[None]):
         except Exception as exc:
             self._set_status(f"Create link failed: {exc}")
 
-    def _on_edit_cred(self, raw: str | None, cred_id: int) -> None:
-        if not raw:
+    def _on_edit_cred(self, values: list[str] | None, cred_id: int) -> None:
+        if values is None:
             return
         try:
-            username, secret, domain, cred_type, secret_format = self._parse_csv(raw, 5)
-            if not username:
-                self._set_status("Username is required.")
-                return
+            username, password, hash_, secret, domain = values
             creds_update(
                 cred_id=cred_id,
-                username=username,
+                username=username or None,
+                password=password or None,
+                hash=hash_ or None,
                 secret=secret or None,
                 domain=domain or None,
-                cred_type=cred_type or "password",
-                secret_format=secret_format or None,
             )
             self._refresh_all()
         except Exception as exc:
             self._set_status(f"Edit credential failed: {exc}")
 
-    def _on_edit_host(self, raw: str | None, host_id: int) -> None:
-        if not raw:
+    def _on_edit_host(self, values: list[str] | None, host_id: int) -> None:
+        if values is None:
             return
         try:
-            ip, hostname, domain, os_name = self._parse_csv(raw, 4)
-            if not ip:
-                self._set_status("IP is required.")
-                return
+            ip, hostname, domain, os_name, role = values
             hosts_update(
                 host_id=host_id,
                 ip=ip,
                 hostname=hostname or None,
                 domain=domain or None,
                 operating_system=os_name or None,
+                role=role or None,
             )
             self._refresh_all()
         except Exception as exc:
             self._set_status(f"Edit host failed: {exc}")
 
-    def _on_edit_link(self, raw: str | None, link_id: int) -> None:
-        if not raw:
+    def _on_edit_link(self, values: list[str] | None, link_id: int) -> None:
+        if values is None:
             return
         try:
-            cred_id, host_id, protocol, status = self._parse_csv(raw, 4)
+            cred_id, host_id, protocol, status = values
             access_update(
                 link_id=link_id,
                 cred_id=int(cred_id),
@@ -431,7 +731,7 @@ class NihilHistoryTUI(App[None]):
             self._set_status(
                 "Loaded: "
                 f"creds={len(creds)} hosts={len(hosts)} links={len(links)} | "
-                "Keys: 1/2/3 switch, a add, e edit, d delete, s set, l link, h allowed values, Enter details, r refresh, q quit"
+                "Keys: h/l tabs, 1/2/3 switch, a add, e edit, d delete, s set, L link, / search, ? allowed values, Enter details, r refresh, q quit"
             )
 
     def _render_empty(self) -> None:
@@ -442,18 +742,29 @@ class NihilHistoryTUI(App[None]):
             table.add_row("No active engagement.")
 
     def _render_creds(self, creds: list) -> None:
+        self._vis_creds = creds
         table = self.query_one("#creds_table", DataTable)
         table.clear(columns=True)
         table.add_column("ID")
         table.add_column("Username")
         table.add_column("Domain")
-        table.add_column("Type")
-        table.add_column("Format")
+        table.add_column("Password")
+        table.add_column("Hash")
+        table.add_column("Secret")
         table.add_column("Source")
         for cred in creds:
-            table.add_row(str(cred.id), cred.username, cred.domain or "-", cred.cred_type, cred.secret_format or "-", cred.source)
+            table.add_row(
+                str(cred.id),
+                cred.username or "-",
+                cred.domain or "-",
+                cred.password or "-",
+                cred.hash or "-",
+                cred.secret or "-",
+                cred.source,
+            )
 
     def _render_hosts(self, hosts: list) -> None:
+        self._vis_hosts = hosts
         table = self.query_one("#hosts_table", DataTable)
         table.clear(columns=True)
         table.add_column("ID")
@@ -461,10 +772,12 @@ class NihilHistoryTUI(App[None]):
         table.add_column("Hostname")
         table.add_column("Domain")
         table.add_column("OS")
+        table.add_column("Role")
         for host in hosts:
-            table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-")
+            table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-", host.role or "-")
 
     def _render_matrix(self, links: list) -> None:
+        self._vis_links = links
         table = self.query_one("#matrix_table", DataTable)
         table.clear(columns=True)
         table.add_column("LinkID")
@@ -478,30 +791,24 @@ class NihilHistoryTUI(App[None]):
     def _selected_cred(self):
         table = self.query_one("#creds_table", DataTable)
         idx = table.cursor_row
-        if idx is None or idx < 0 or idx >= len(self.state.creds):
+        if idx is None or idx < 0 or idx >= len(self._vis_creds):
             self._set_status("No credential row selected.")
             return None
-        return self.state.creds[idx]
+        return self._vis_creds[idx]
 
     def _selected_host(self):
         table = self.query_one("#hosts_table", DataTable)
         idx = table.cursor_row
-        if idx is None or idx < 0 or idx >= len(self.state.hosts):
+        if idx is None or idx < 0 or idx >= len(self._vis_hosts):
             self._set_status("No host row selected.")
             return None
-        return self.state.hosts[idx]
+        return self._vis_hosts[idx]
 
     def _selected_link(self):
         table = self.query_one("#matrix_table", DataTable)
         idx = table.cursor_row
-        if idx is None or idx < 0 or idx >= len(self.state.links):
+        if idx is None or idx < 0 or idx >= len(self._vis_links):
             self._set_status("No access row selected.")
             return None
-        return self.state.links[idx]
+        return self._vis_links[idx]
 
-    @staticmethod
-    def _parse_csv(raw: str, expected: int) -> list[str]:
-        parts = [p.strip() for p in raw.split(",")]
-        if len(parts) < expected:
-            parts.extend([""] * (expected - len(parts)))
-        return parts[:expected]

@@ -32,11 +32,11 @@ class Credential(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"), nullable=False, index=True)
-    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    cred_type: Mapped[str] = mapped_column(String(64), default="password", nullable=False)
-    secret_format: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String(64), default="manual", nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
@@ -49,10 +49,11 @@ class Host(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"), nullable=False, index=True)
-    ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     operating_system: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(64), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
 
