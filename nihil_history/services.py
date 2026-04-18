@@ -21,7 +21,19 @@ class MissingEngagementError(RuntimeError):
     pass
 
 
+def ensure_default_engagement() -> None:
+    """Create and activate 'default' engagement if none exists."""
+    init_db()
+    cfg = load_config()
+    if not cfg.current_engagement:
+        with get_session() as session:
+            any_engagement = session.scalar(select(Engagement).limit(1))
+        if any_engagement is None:
+            engagement_init("default")
+
+
 def _current_engagement_name() -> str:
+    ensure_default_engagement()
     cfg = load_config()
     if not cfg.current_engagement:
         raise MissingEngagementError("No active engagement. Use `nhi engagement use <name>`.")
@@ -76,6 +88,75 @@ def engagement_list() -> list[Engagement]:
     init_db()
     with get_session() as session:
         return list(session.scalars(select(Engagement).order_by(Engagement.created_at.desc())).all())
+
+
+def engagement_rename(old_name: str, new_name: str) -> Engagement:
+    init_db()
+    with get_session() as session:
+        entry = session.scalar(select(Engagement).where(Engagement.name == old_name))
+        if entry is None:
+            raise MissingEngagementError(f"Engagement '{old_name}' does not exist.")
+        conflict = session.scalar(select(Engagement).where(Engagement.name == new_name))
+        if conflict is not None:
+            raise ValueError(f"Engagement '{new_name}' already exists. Use merge to combine them.")
+        entry.name = new_name
+        session.commit()
+        session.refresh(entry)
+    cfg = load_config()
+    if cfg.current_engagement == old_name:
+        cfg.current_engagement = new_name
+        save_config(cfg)
+        try:
+            write_env_file()
+        except Exception:
+            pass
+    return entry
+
+
+def engagement_merge(src_name: str, dst_name: str) -> Engagement:
+    """Move all data from src into dst, then delete src."""
+    init_db()
+    with get_session() as session:
+        src = session.scalar(select(Engagement).where(Engagement.name == src_name))
+        if src is None:
+            raise MissingEngagementError(f"Engagement '{src_name}' does not exist.")
+        dst = session.scalar(select(Engagement).where(Engagement.name == dst_name))
+        if dst is None:
+            raise MissingEngagementError(f"Engagement '{dst_name}' does not exist.")
+        from sqlalchemy import update as sa_update
+        session.execute(sa_update(Credential).where(Credential.engagement_id == src.id).values(engagement_id=dst.id))
+        session.execute(sa_update(Host).where(Host.engagement_id == src.id).values(engagement_id=dst.id))
+        session.execute(sa_update(AccessLink).where(AccessLink.engagement_id == src.id).values(engagement_id=dst.id))
+        session.delete(src)
+        session.commit()
+        session.refresh(dst)
+    cfg = load_config()
+    if cfg.current_engagement == src_name:
+        cfg.current_engagement = dst_name
+        save_config(cfg)
+        try:
+            write_env_file()
+        except Exception:
+            pass
+    return dst
+
+
+def engagement_delete(name: str) -> None:
+    init_db()
+    with get_session() as session:
+        entry = session.scalar(select(Engagement).where(Engagement.name == name))
+        if entry is None:
+            raise MissingEngagementError(f"Engagement '{name}' does not exist.")
+        session.delete(entry)
+        session.commit()
+    cfg = load_config()
+    if cfg.current_engagement == name:
+        cfg.current_engagement = None
+        save_config(cfg)
+        try:
+            write_env_file()
+        except Exception:
+            pass
 
 
 def _engagement_id() -> int:

@@ -12,6 +12,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Sta
 from nihil_history.config import load_config
 from nihil_history.services import (
     MissingEngagementError,
+    ensure_default_engagement,
     access_link,
     access_list,
     access_remove,
@@ -21,8 +22,11 @@ from nihil_history.services import (
     creds_remove,
     creds_set,
     creds_update,
+    engagement_delete,
     engagement_init,
     engagement_list,
+    engagement_merge,
+    engagement_rename,
     hosts_add,
     hosts_list,
     hosts_remove,
@@ -43,6 +47,10 @@ class SelectionState:
 
 
 class QuickInputScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+c", "cancel", "Cancel"),
+    ]
     CSS = """
     QuickInputScreen {
       align: center middle;
@@ -76,6 +84,9 @@ class QuickInputScreen(ModalScreen[str | None]):
                 yield Button("OK", variant="success", id="ok")
                 yield Button("Cancel", id="cancel")
 
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
     @on(Button.Pressed, "#ok")
     def _ok(self) -> None:
         value = self.query_one("#value", Input).value.strip()
@@ -90,6 +101,10 @@ class QuickInputScreen(ModalScreen[str | None]):
 
 
 class MultiFieldScreen(ModalScreen[list[str] | None]):
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+c", "cancel", "Cancel"),
+    ]
     CSS = """
     MultiFieldScreen {
       align: center middle;
@@ -137,6 +152,9 @@ class MultiFieldScreen(ModalScreen[list[str] | None]):
     def _ok(self) -> None:
         self.dismiss(self._collect())
 
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
     @on(Button.Pressed, "#cancel")
     def _cancel(self) -> None:
         self.dismiss(None)
@@ -157,6 +175,16 @@ class MultiFieldScreen(ModalScreen[list[str] | None]):
 
 
 class EngagementScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("enter", "select_row", "Select"),
+        Binding("n", "new_engagement", "New"),
+        Binding("r", "rename_engagement", "Rename"),
+        Binding("d", "delete_engagement", "Delete"),
+        Binding("j", "vi_down", "↓", show=False),
+        Binding("k", "vi_up", "↑", show=False),
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+c", "cancel", "Cancel"),
+    ]
     CSS = """
     EngagementScreen {
       align: center middle;
@@ -164,12 +192,21 @@ class EngagementScreen(ModalScreen[str | None]):
     #dialog {
       width: 80;
       height: auto;
+      max-height: 30;
       border: round $accent;
       padding: 1;
       background: $panel;
     }
-    #existing {
+    #title {
+      margin-bottom: 1;
+    }
+    #hint {
       color: $text-muted;
+      margin-bottom: 1;
+    }
+    #eng_table {
+      height: auto;
+      max-height: 15;
       margin-bottom: 1;
     }
     #row {
@@ -181,35 +218,153 @@ class EngagementScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, existing: list[str]) -> None:
+    def __init__(self, current: str | None, existing: list[str]) -> None:
         super().__init__()
+        self.current = current
         self.existing = existing
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
-            yield Label("Select or create an engagement")
-            if self.existing:
-                yield Label(f"Existing: {', '.join(self.existing)}", id="existing")
-            yield Input(placeholder="engagement-name", id="name")
+            yield Label("Engagement manager", id="title")
+            yield Label("Enter / select  |  n new  |  r rename  |  d delete  |  Esc cancel", id="hint")
+            yield DataTable(id="eng_table", cursor_type="row")
             with Container(id="row"):
-                yield Button("OK", variant="success", id="ok")
+                yield Button("Select", variant="success", id="select")
+                yield Button("New", id="new")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
-        self.query_one("#name", Input).focus()
+        self._rebuild_table()
+        self.query_one("#eng_table", DataTable).focus()
 
-    @on(Button.Pressed, "#ok")
-    def _ok(self) -> None:
-        value = self.query_one("#name", Input).value.strip()
-        self.dismiss(value or None)
+    def _rebuild_table(self) -> None:
+        table = self.query_one("#eng_table", DataTable)
+        table.clear(columns=True)
+        table.add_column("Engagement")
+        table.add_column("Active")
+        for name in self.existing:
+            table.add_row(name, "✓" if name == self.current else "")
+
+    def _selected_name(self) -> str | None:
+        table = self.query_one("#eng_table", DataTable)
+        idx = table.cursor_row
+        if idx is None or idx < 0 or idx >= len(self.existing):
+            return None
+        return self.existing[idx]
+
+    @on(Button.Pressed, "#select")
+    def _btn_select(self) -> None:
+        self.dismiss(self._selected_name())
+
+    @on(Button.Pressed, "#new")
+    def _btn_new(self) -> None:
+        self.action_new_engagement()
 
     @on(Button.Pressed, "#cancel")
-    def _cancel(self) -> None:
+    def _btn_cancel(self) -> None:
         self.dismiss(None)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        value = event.value.strip()
-        self.dismiss(value or None)
+    def action_select_row(self) -> None:
+        self.dismiss(self._selected_name())
+
+    @on(DataTable.RowSelected, "#eng_table")
+    def _row_selected(self, event: DataTable.RowSelected) -> None:
+        event.stop()
+        self.dismiss(self._selected_name())
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_vi_down(self) -> None:
+        table = self.query_one("#eng_table", DataTable)
+        table.move_cursor(row=min(table.cursor_row + 1, table.row_count - 1))
+
+    def action_vi_up(self) -> None:
+        table = self.query_one("#eng_table", DataTable)
+        table.move_cursor(row=max(table.cursor_row - 1, 0))
+
+    def action_new_engagement(self) -> None:
+        def _on_name(value: str | None) -> None:
+            if not value:
+                return
+            try:
+                engagement_init(value)
+                self.existing.append(value)
+                self.current = value
+                self._rebuild_table()
+            except Exception as exc:
+                self.notify(str(exc), severity="error", markup=False)
+
+        self.app.push_screen(
+            QuickInputScreen("New engagement name", "engagement-name"),
+            callback=_on_name,
+        )
+
+    def action_rename_engagement(self) -> None:
+        name = self._selected_name()
+        if name is None:
+            return
+
+        def _do_merge(src: str, dst: str) -> None:
+            def _confirm(value: str | None) -> None:
+                if (value or "").upper() != "YES":
+                    return
+                try:
+                    engagement_merge(src, dst)
+                    self.existing.remove(src)
+                    if self.current == src:
+                        self.current = dst
+                    self._rebuild_table()
+                except Exception as exc:
+                    self.notify(str(exc), severity="error", markup=False)
+
+            self.app.push_screen(
+                QuickInputScreen(f"'{dst}' exists. Merge '{src}' into it? Type YES", "YES"),
+                callback=_confirm,
+            )
+
+        def _on_new_name(value: str | None) -> None:
+            if not value:
+                return
+            if value in self.existing:
+                _do_merge(name, value)
+                return
+            try:
+                engagement_rename(name, value)
+                idx = self.existing.index(name)
+                self.existing[idx] = value
+                if self.current == name:
+                    self.current = value
+                self._rebuild_table()
+            except Exception as exc:
+                self.notify(str(exc), severity="error", markup=False)
+
+        self.app.push_screen(
+            QuickInputScreen(f"Rename '{name}' to", name),
+            callback=_on_new_name,
+        )
+
+    def action_delete_engagement(self) -> None:
+        name = self._selected_name()
+        if name is None:
+            return
+
+        def _confirm(value: str | None) -> None:
+            if (value or "").upper() != "YES":
+                return
+            try:
+                engagement_delete(name)
+                self.existing.remove(name)
+                if self.current == name:
+                    self.current = None
+                self._rebuild_table()
+            except Exception as exc:
+                self.notify(str(exc), severity="error", markup=False)
+
+        self.app.push_screen(
+            QuickInputScreen(f"Delete '{name}' and all its data? Type YES", "YES"),
+            callback=_confirm,
+        )
 
 
 class NihilHistoryTUI(App[None]):
@@ -227,6 +382,8 @@ class NihilHistoryTUI(App[None]):
         Binding("e", "edit_item", "Edit"),
         Binding("s", "set_item", "Set"),
         Binding("L", "link_item", "Link"),
+        Binding("ctrl+d", "toggle_dc", "DC", show=False),
+        Binding("v", "visual_toggle", "Visual", show=False),
         Binding("?", "show_allowed_values", "?"),
         Binding("enter", "show_details", "Set+Quit"),
         Binding("j", "vi_down", "↓", show=False),
@@ -261,6 +418,8 @@ class NihilHistoryTUI(App[None]):
         self._vis_hosts: list = []
         self._vis_links: list = []
         self._search_query: str = ""
+        self._visual_mode: bool = False
+        self._visual_anchor: int = 0
         yield Header()
         with Container():
             yield Static("Ready", id="status")
@@ -275,6 +434,10 @@ class NihilHistoryTUI(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        try:
+            ensure_default_engagement()
+        except Exception:
+            pass
         cfg = load_config()
         if not cfg.current_engagement:
             self._show_engagement_picker()
@@ -293,7 +456,8 @@ class NihilHistoryTUI(App[None]):
             existing = [e.name for e in engagement_list()]
         except Exception:
             existing = []
-        self.push_screen(EngagementScreen(existing), callback=self._on_engagement_selected)
+        current = load_config().current_engagement
+        self.push_screen(EngagementScreen(current, existing), callback=self._on_engagement_selected)
 
     def _on_engagement_selected(self, name: str | None) -> None:
         if not name:
@@ -357,7 +521,6 @@ class NihilHistoryTUI(App[None]):
                     [
                         ("IP", "10.10.10.10", ""),
                         ("Hostname", "DC01", ""),
-                        ("Domain", "ACME.LOCAL", ""),
                         ("OS", "Windows Server 2022", ""),
                         ("Role  [DC, WS, SRV, WEB, ...]", "DC", ""),
                     ],
@@ -370,6 +533,28 @@ class NihilHistoryTUI(App[None]):
 
     def action_delete_item(self) -> None:
         active = self.query_one(TabbedContent).active
+        if self._visual_mode:
+            t = self._active_table()
+            if t is None:
+                return
+            sel = self._visual_selection(t)
+            if active == "creds":
+                items = self._vis_creds[sel.start:sel.stop]
+            elif active == "hosts":
+                items = self._vis_hosts[sel.start:sel.stop]
+            else:
+                self._exit_visual_mode()
+                return
+            if not items:
+                self._exit_visual_mode()
+                return
+            entity = active if active in ("creds", "hosts") else "matrix"
+            ids = [item.id for item in items]
+            self.push_screen(
+                QuickInputScreen(f"Delete {len(ids)} {entity} ({', '.join(str(i) for i in ids)})? Type YES", "YES"),
+                callback=lambda raw: self._confirm_delete_many(raw, entity, ids),
+            )
+            return
         if active == "creds":
             selected = self._selected_cred()
             if selected is None:
@@ -425,7 +610,6 @@ class NihilHistoryTUI(App[None]):
                     [
                         ("IP", "10.10.10.10", selected.ip or ""),
                         ("Hostname", "DC01", selected.hostname or ""),
-                        ("Domain", "ACME.LOCAL", selected.domain or ""),
                         ("OS", "Windows Server 2022", selected.operating_system or ""),
                         ("Role  [DC, WS, SRV, WEB, ...]", "DC", selected.role or ""),
                     ],
@@ -458,13 +642,13 @@ class NihilHistoryTUI(App[None]):
             if selected is None:
                 return
             creds_set(selected.id)
-            self._set_status(f"Selected credential id={selected.id}")
+            self.notify(f"Credential set: {selected.username or '-'} (id={selected.id})", title="Set", severity="information")
         elif active == "hosts":
             selected = self._selected_host()
             if selected is None:
                 return
             hosts_set(selected.id)
-            self._set_status(f"Selected host id={selected.id}")
+            self.notify(f"Host set: {selected.ip or selected.hostname or '-'} (id={selected.id})", title="Set", severity="information")
         else:
             self._set_status("Set is available on credentials and hosts tabs.")
             return
@@ -486,6 +670,69 @@ class NihilHistoryTUI(App[None]):
             callback=self._on_add_link,
         )
 
+    def action_toggle_dc(self) -> None:
+        if self.query_one(TabbedContent).active != "hosts":
+            return
+        selected = self._selected_host()
+        if selected is None:
+            return
+        new_role = None if selected.role == "DC" else "DC"
+        try:
+            hosts_update(
+                host_id=selected.id,
+                ip=selected.ip,
+                hostname=selected.hostname,
+                domain=selected.domain,
+                operating_system=selected.operating_system,
+                role=new_role,
+            )
+            label = selected.ip or selected.hostname or f"id={selected.id}"
+            if new_role:
+                self.notify(f"{label}  →  DC", title="Role set", severity="information")
+            else:
+                self.notify(f"{label}  →  role cleared", title="Role cleared", severity="information")
+            self._refresh_all()
+        except Exception as exc:
+            self.notify(str(exc), title="Toggle DC failed", severity="error", markup=False)
+
+    def action_visual_toggle(self) -> None:
+        active = self.query_one(TabbedContent).active
+        if active not in ("creds", "hosts"):
+            return
+        if self._visual_mode:
+            self._exit_visual_mode()
+            return
+        t = self._active_table()
+        if t is None or t.row_count == 0:
+            return
+        self._visual_mode = True
+        self._visual_anchor = t.cursor_row
+        self._update_visual_status(t)
+
+    def _exit_visual_mode(self) -> None:
+        self._visual_mode = False
+        active = self.query_one(TabbedContent).active
+        if active == "creds":
+            self._render_creds(self._vis_creds)
+        elif active == "hosts":
+            self._render_hosts(self._vis_hosts)
+        self._set_status("-- NORMAL --")
+
+    def _visual_selection(self, t) -> range:
+        a = self._visual_anchor
+        b = t.cursor_row
+        return range(min(a, b), max(a, b) + 1)
+
+    def _update_visual_status(self, t) -> None:
+        sel = self._visual_selection(t)
+        n = len(sel)
+        self._set_status(f"-- VISUAL -- {n} row{'s' if n > 1 else ''} (#{sel.start + 1}-#{sel.stop})  |  d delete  |  Esc cancel")
+        active = self.query_one(TabbedContent).active
+        if active == "creds":
+            self._render_creds(self._vis_creds, sel)
+        elif active == "hosts":
+            self._render_hosts(self._vis_hosts, sel)
+
     def action_show_allowed_values(self) -> None:
         protocols = ", ".join(sorted(ALLOWED_PROTOCOLS))
         status = ", ".join(sorted(ALLOWED_STATUS))
@@ -500,21 +747,29 @@ class NihilHistoryTUI(App[None]):
         if t := self._active_table():
             t.focus()
             t.move_cursor(row=min(t.cursor_row + 1, t.row_count - 1))
+            if self._visual_mode:
+                self._update_visual_status(t)
 
     def action_vi_up(self) -> None:
         if t := self._active_table():
             t.focus()
             t.move_cursor(row=max(t.cursor_row - 1, 0))
+            if self._visual_mode:
+                self._update_visual_status(t)
 
     def action_vi_top(self) -> None:
         if t := self._active_table():
             t.focus()
             t.move_cursor(row=0)
+            if self._visual_mode:
+                self._update_visual_status(t)
 
     def action_vi_bottom(self) -> None:
         if t := self._active_table():
             t.focus()
             t.move_cursor(row=max(t.row_count - 1, 0))
+            if self._visual_mode:
+                self._update_visual_status(t)
 
     def action_search_open(self) -> None:
         bar = self.query_one("#search_bar", Input)
@@ -543,7 +798,7 @@ class NihilHistoryTUI(App[None]):
             hosts = [h for h in self.state.hosts if
                      q in (h.ip or "").lower() or
                      q in (h.hostname or "").lower() or
-                     q in (h.domain or "").lower() or
+                     q in (h.operating_system or "").lower() or
                      q in (h.role or "").lower()]
             links = [lnk for lnk in self.state.links if
                      q in lnk.protocol.lower() or
@@ -571,6 +826,10 @@ class NihilHistoryTUI(App[None]):
         bar = self.query_one("#search_bar", Input)
         if event.key == "escape" and bar.display and bar.has_focus:
             self._close_search()
+            event.stop()
+            return
+        if event.key == "escape" and self._visual_mode:
+            self._exit_visual_mode()
             event.stop()
 
     @on(DataTable.RowSelected)
@@ -614,23 +873,25 @@ class NihilHistoryTUI(App[None]):
                 secret=secret or None,
                 domain=domain or None,
             )
-            self._refresh_all(status_message=f"Credential added: id={cred.id} user={cred.username or '-'}")
+            self.notify(f"{cred.username or '-'}  added (id={cred.id})", title="Credential added", severity="information")
+            self._refresh_all()
         except MissingEngagementError:
-            self._set_status("No active engagement. Press 'g' to select one.")
+            self.notify("No active engagement.", title="Error", severity="error")
         except Exception as exc:
-            self._set_status(f"Add credential failed: {exc}")
+            self.notify(str(exc), title="Add credential failed", severity="error", markup=False)
 
     def _on_add_host(self, values: list[str] | None) -> None:
         if values is None:
             return
         try:
-            ip, hostname, domain, os_name, role = values
-            host = hosts_add(ip=ip or None, hostname=hostname or None, domain=domain or None, operating_system=os_name or None, role=role or None)
-            self._refresh_all(status_message=f"Host added: id={host.id} ip={host.ip}")
+            ip, hostname, os_name, role = values
+            host = hosts_add(ip=ip or None, hostname=hostname or None, domain=None, operating_system=os_name or None, role=role or None)
+            self.notify(f"{host.ip or host.hostname or '-'}  added (id={host.id})", title="Host added", severity="information")
+            self._refresh_all()
         except MissingEngagementError:
-            self._set_status("No active engagement. Use `nhi engagement init <name>` first.")
+            self.notify("No active engagement.", title="Error", severity="error")
         except Exception as exc:
-            self._set_status(f"Add host failed: {exc}")
+            self.notify(str(exc), title="Add host failed", severity="error", markup=False)
 
     def _on_add_link(self, values: list[str] | None) -> None:
         if values is None:
@@ -657,26 +918,28 @@ class NihilHistoryTUI(App[None]):
                 secret=secret or None,
                 domain=domain or None,
             )
+            self.notify(f"Credential id={cred_id} updated", title="Edited", severity="information")
             self._refresh_all()
         except Exception as exc:
-            self._set_status(f"Edit credential failed: {exc}")
+            self.notify(str(exc), title="Edit credential failed", severity="error", markup=False)
 
     def _on_edit_host(self, values: list[str] | None, host_id: int) -> None:
         if values is None:
             return
         try:
-            ip, hostname, domain, os_name, role = values
+            ip, hostname, os_name, role = values
             hosts_update(
                 host_id=host_id,
                 ip=ip,
                 hostname=hostname or None,
-                domain=domain or None,
+                domain=None,
                 operating_system=os_name or None,
                 role=role or None,
             )
+            self.notify(f"Host id={host_id} updated", title="Edited", severity="information")
             self._refresh_all()
         except Exception as exc:
-            self._set_status(f"Edit host failed: {exc}")
+            self.notify(str(exc), title="Edit host failed", severity="error", markup=False)
 
     def _on_edit_link(self, values: list[str] | None, link_id: int) -> None:
         if values is None:
@@ -694,9 +957,28 @@ class NihilHistoryTUI(App[None]):
         except Exception as exc:
             self._set_status(f"Edit link failed: {exc}")
 
-    def _confirm_delete(self, raw: str | None, entity: str, entity_id: int) -> None:
+    def _confirm_delete_many(self, raw: str | None, entity: str, ids: list[int]) -> None:
+        self._exit_visual_mode()
         if (raw or "").upper() != "YES":
             self._set_status("Delete cancelled.")
+            return
+        errors = []
+        for eid in ids:
+            try:
+                if entity == "creds":
+                    creds_remove(eid)
+                else:
+                    hosts_remove(eid)
+            except Exception as exc:
+                errors.append(str(exc))
+        if errors:
+            self.notify("; ".join(errors), title="Delete errors", severity="error", markup=False)
+        else:
+            self.notify(f"{len(ids)} {entity} deleted", title="Deleted", severity="warning")
+        self._refresh_all()
+
+    def _confirm_delete(self, raw: str | None, entity: str, entity_id: int) -> None:
+        if (raw or "").upper() != "YES":
             return
         try:
             if entity == "creds":
@@ -705,9 +987,10 @@ class NihilHistoryTUI(App[None]):
                 hosts_remove(entity_id)
             else:
                 access_remove(entity_id)
+            self.notify(f"{entity.rstrip('s')} id={entity_id} deleted", title="Deleted", severity="warning")
             self._refresh_all()
         except Exception as exc:
-            self._set_status(f"Delete failed: {exc}")
+            self.notify(str(exc), title="Delete failed", severity="error", markup=False)
 
     def _refresh_all(self, status_message: str | None = None) -> None:
         try:
@@ -719,12 +1002,23 @@ class NihilHistoryTUI(App[None]):
             self._render_empty()
             return
 
+        prev_creds = self.query_one("#creds_table", DataTable).cursor_row
+        prev_hosts = self.query_one("#hosts_table", DataTable).cursor_row
+        prev_matrix = self.query_one("#matrix_table", DataTable).cursor_row
+
         self.state.creds = creds
         self.state.hosts = hosts
         self.state.links = links
         self._render_creds(creds)
         self._render_hosts(hosts)
         self._render_matrix(links)
+
+        if creds:
+            self.query_one("#creds_table", DataTable).move_cursor(row=max(0, min(prev_creds, len(creds) - 1)))
+        if hosts:
+            self.query_one("#hosts_table", DataTable).move_cursor(row=max(0, min(prev_hosts, len(hosts) - 1)))
+        if links:
+            self.query_one("#matrix_table", DataTable).move_cursor(row=max(0, min(prev_matrix, len(links) - 1)))
         if status_message:
             self._set_status(status_message)
         else:
@@ -741,10 +1035,12 @@ class NihilHistoryTUI(App[None]):
             table.add_column("Info")
             table.add_row("No active engagement.")
 
-    def _render_creds(self, creds: list) -> None:
+    def _render_creds(self, creds: list, selection: range | None = None) -> None:
         self._vis_creds = creds
         table = self.query_one("#creds_table", DataTable)
+        prev = table.cursor_row
         table.clear(columns=True)
+        table.add_column(" ", width=1)
         table.add_column("ID")
         table.add_column("Username")
         table.add_column("Domain")
@@ -752,8 +1048,10 @@ class NihilHistoryTUI(App[None]):
         table.add_column("Hash")
         table.add_column("Secret")
         table.add_column("Source")
-        for cred in creds:
+        for i, cred in enumerate(creds):
+            marker = "▶" if selection is not None and i in selection else " "
             table.add_row(
+                marker,
                 str(cred.id),
                 cred.username or "-",
                 cred.domain or "-",
@@ -762,19 +1060,25 @@ class NihilHistoryTUI(App[None]):
                 cred.secret or "-",
                 cred.source,
             )
+        if selection is not None and creds:
+            table.move_cursor(row=max(0, min(prev, len(creds) - 1)))
 
-    def _render_hosts(self, hosts: list) -> None:
+    def _render_hosts(self, hosts: list, selection: range | None = None) -> None:
         self._vis_hosts = hosts
         table = self.query_one("#hosts_table", DataTable)
+        prev = table.cursor_row
         table.clear(columns=True)
+        table.add_column(" ", width=1)
         table.add_column("ID")
         table.add_column("IP")
         table.add_column("Hostname")
-        table.add_column("Domain")
         table.add_column("OS")
         table.add_column("Role")
-        for host in hosts:
-            table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-", host.role or "-")
+        for i, host in enumerate(hosts):
+            marker = "▶" if selection is not None and i in selection else " "
+            table.add_row(marker, str(host.id), host.ip or "-", host.hostname or "-", host.operating_system or "-", host.role or "-")
+        if selection is not None and hosts:
+            table.move_cursor(row=max(0, min(prev, len(hosts) - 1)))
 
     def _render_matrix(self, links: list) -> None:
         self._vis_links = links

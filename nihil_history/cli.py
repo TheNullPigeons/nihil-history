@@ -10,6 +10,7 @@ from rich.table import Table
 from nihil_history.db import init_db
 from nihil_history.services import (
     MissingEngagementError,
+    ensure_default_engagement,
     access_link,
     access_list,
     access_matrix,
@@ -31,7 +32,7 @@ from nihil_history.services import (
     hosts_list,
 )
 from nihil_history.sync_nmap import import_nmap_xml
-from nihil_history.sync_nxc import import_nxc_text
+from nihil_history.sync_nxc import import_nxc_db
 from nihil_history.tui import NihilHistoryTUI
 
 app = typer.Typer(no_args_is_help=True, help="nihil-history CLI")
@@ -51,11 +52,16 @@ def _handle_missing_engagement(exc: MissingEngagementError) -> None:
 
 
 @app.callback()
-def main() -> None:
+def main(ctx: typer.Context) -> None:
     binary_name = Path(sys.argv[0]).name
     if binary_name == "nxh":
         console.print("[yellow]Deprecated alias:[/yellow] use `nhi` instead of `nxh`.")
-    init_db()
+    ensure_default_engagement()
+    if ctx.invoked_subcommand != "sync":
+        try:
+            import_nxc_db()
+        except Exception:
+            pass
 
 
 app.add_typer(engagement_app, name="engagement")
@@ -338,11 +344,13 @@ def cmd_env_export(
 
 
 @sync_app.command("nxc")
-def cmd_sync_nxc(file: str = typer.Option(..., "--file", "-f")) -> None:
+def cmd_sync_nxc(
+    workspace_path: str = typer.Option(None, "--workspace-path", "-w", help="Path to ~/.nxc/workspaces (default: ~/.nxc/workspaces)"),
+) -> None:
     try:
-        result = import_nxc_text(file)
-    except FileNotFoundError:
-        console.print(f"[red]File not found:[/red] {file}")
+        result = import_nxc_db(workspace_path)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
