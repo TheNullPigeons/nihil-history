@@ -366,6 +366,11 @@ def cmd_tui() -> None:
 
 def tui_main() -> None:
     init_db()
+    ensure_default_engagement()
+    try:
+        import_nxc_db()
+    except Exception:
+        pass
     NihilHistoryTUI().run()
 
 

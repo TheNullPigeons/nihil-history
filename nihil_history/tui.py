@@ -307,7 +307,7 @@ class EngagementScreen(ModalScreen[str | None]):
 
         def _do_merge(src: str, dst: str) -> None:
             def _confirm(value: str | None) -> None:
-                if (value or "").upper() != "YES":
+                if (value or "").upper() not in ("Y", "YES"):
                     return
                 try:
                     engagement_merge(src, dst)
@@ -319,7 +319,7 @@ class EngagementScreen(ModalScreen[str | None]):
                     self.notify(str(exc), severity="error", markup=False)
 
             self.app.push_screen(
-                QuickInputScreen(f"'{dst}' exists. Merge '{src}' into it? Type YES", "YES"),
+                QuickInputScreen(f"'{dst}' exists. Merge '{src}' into it? Type y", "y"),
                 callback=_confirm,
             )
 
@@ -350,7 +350,7 @@ class EngagementScreen(ModalScreen[str | None]):
             return
 
         def _confirm(value: str | None) -> None:
-            if (value or "").upper() != "YES":
+            if (value or "").upper() not in ("Y", "YES"):
                 return
             try:
                 engagement_delete(name)
@@ -362,7 +362,7 @@ class EngagementScreen(ModalScreen[str | None]):
                 self.notify(str(exc), severity="error", markup=False)
 
         self.app.push_screen(
-            QuickInputScreen(f"Delete '{name}' and all its data? Type YES", "YES"),
+            QuickInputScreen(f"Delete '{name}' and all its data? Type y", "y"),
             callback=_confirm,
         )
 
@@ -551,7 +551,7 @@ class NihilHistoryTUI(App[None]):
             entity = active if active in ("creds", "hosts") else "matrix"
             ids = [item.id for item in items]
             self.push_screen(
-                QuickInputScreen(f"Delete {len(ids)} {entity} ({', '.join(str(i) for i in ids)})? Type YES", "YES"),
+                QuickInputScreen(f"Delete {len(ids)} {entity} ({', '.join(str(i) for i in ids)})? Type y", "y"),
                 callback=lambda raw: self._confirm_delete_many(raw, entity, ids),
             )
             return
@@ -560,7 +560,7 @@ class NihilHistoryTUI(App[None]):
             if selected is None:
                 return
             self.push_screen(
-                QuickInputScreen(f"Delete credential id={selected.id}? Type YES", "YES"),
+                QuickInputScreen(f"Delete credential id={selected.id}? Type y", "y"),
                 callback=lambda raw: self._confirm_delete(raw, "creds", selected.id),
             )
         elif active == "hosts":
@@ -568,7 +568,7 @@ class NihilHistoryTUI(App[None]):
             if selected is None:
                 return
             self.push_screen(
-                QuickInputScreen(f"Delete host id={selected.id}? Type YES", "YES"),
+                QuickInputScreen(f"Delete host id={selected.id}? Type y", "y"),
                 callback=lambda raw: self._confirm_delete(raw, "hosts", selected.id),
             )
         elif active == "matrix":
@@ -577,7 +577,7 @@ class NihilHistoryTUI(App[None]):
                 self._set_status("No access row selected.")
                 return
             self.push_screen(
-                QuickInputScreen(f"Delete link id={selected.id}? Type YES", "YES"),
+                QuickInputScreen(f"Delete link id={selected.id}? Type y", "y"),
                 callback=lambda raw: self._confirm_delete(raw, "matrix", selected.id),
             )
 
@@ -959,7 +959,7 @@ class NihilHistoryTUI(App[None]):
 
     def _confirm_delete_many(self, raw: str | None, entity: str, ids: list[int]) -> None:
         self._exit_visual_mode()
-        if (raw or "").upper() != "YES":
+        if (raw or "").upper() not in ("Y", "YES"):
             self._set_status("Delete cancelled.")
             return
         errors = []
@@ -978,7 +978,7 @@ class NihilHistoryTUI(App[None]):
         self._refresh_all()
 
     def _confirm_delete(self, raw: str | None, entity: str, entity_id: int) -> None:
-        if (raw or "").upper() != "YES":
+        if (raw or "").upper() not in ("Y", "YES"):
             return
         try:
             if entity == "creds":
