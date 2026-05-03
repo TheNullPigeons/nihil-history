@@ -7,7 +7,7 @@ from nihil_history.services import access_link, creds_add, creds_list, hosts_add
 
 _DEFAULT_WORKSPACES = Path("~/.nxc/workspaces")
 
-# (cred_query, host_query) — empty string means skip
+# (cred_query, host_query) - empty string means skip
 _DB_QUERIES: dict[str, tuple[str, str]] = {
     "smb.db": (
         "SELECT username, password, domain, credtype FROM users",
@@ -50,14 +50,14 @@ def _norm(v: str | None) -> str | None:
 
 
 def _norm_secret(v: str | None) -> str | None:
-    """Normalize secret value — strip only, preserve case (passwords/hashes are case-sensitive)."""
+    """Normalize secret value - strip only, preserve case (passwords/hashes are case-sensitive)."""
     return v.strip() if v else None
 
 
 def _cred_exists(username: str, domain: str | None, password: str | None, hash_: str | None) -> int | None:
     username_n = _norm(username)
     domain_n = _norm(domain)
-    # treat hash and password as the same "secret" slot — NXC may classify differently across syncs
+    # treat hash and password as the same "secret" slot - NXC may classify differently across syncs
     secret = _norm_secret(password) or _norm_secret(hash_)
     for cred in creds_list():
         if _norm(cred.username) != username_n:
@@ -70,11 +70,11 @@ def _cred_exists(username: str, domain: str | None, password: str | None, hash_:
     return None
 
 
-def _host_exists(ip: str) -> int | None:
+def _host_pair_exists(ip: str, hostname: str | None) -> bool:
     for host in hosts_list():
-        if host.ip == ip:
-            return host.id
-    return None
+        if host.ip == ip and (host.hostname or None) == (hostname or None):
+            return True
+    return False
 
 
 def _extract_creds(db_path: Path, query: str, source: str) -> list[dict]:
@@ -159,7 +159,9 @@ def import_nxc_db(workspaces_path: str | None = None) -> dict[str, int]:
                 all_hosts.extend(_extract_hosts(db_path, host_q, source))
 
         for h in all_hosts:
-            if h["ip"] and not _host_exists(h["ip"]):
+            if not h["ip"]:
+                continue
+            if not _host_pair_exists(h["ip"], h["hostname"]):
                 hosts_add(ip=h["ip"], hostname=h["hostname"], domain=h["domain"], operating_system=h.get("os"), source=h["source"])
                 added_hosts += 1
 
