@@ -345,7 +345,7 @@ def cmd_env_export(
 
 @sync_app.command("nxc")
 def cmd_sync_nxc(
-    workspace_path: str = typer.Option(None, "--workspace-path", "-w", help="Path to ~/.nxc/workspaces (default: ~/.nxc/workspaces)"),
+    workspace_path: str = typer.Option(None, "--workspace-path", "--workspace", "-w", help="Path to ~/.nxc/workspaces (default: ~/.nxc/workspaces)"),
 ) -> None:
     try:
         result = import_nxc_db(workspace_path)
