@@ -9,6 +9,7 @@ from nihil_history.config import env_file_path, key_path, load_config, save_conf
 from nihil_history.crypto import decrypt_secret, encrypt_secret, load_or_create_key
 from nihil_history.db import get_session, init_db
 from nihil_history.models import AccessLink, Credential, Engagement, Host
+from nihil_history import nxc
 from nihil_history.validators import (
     validate_domain,
     validate_ip,
@@ -49,18 +50,22 @@ def require_engagement() -> Engagement:
         return entry
 
 
-def engagement_init(name: str) -> Engagement:
+def engagement_init(name: str, nxc_workspace: str | None = None) -> Engagement:
     init_db()
     cfg = load_config()
+    workspace = nxc_workspace or name
     with get_session() as session:
         existing = session.scalar(select(Engagement).where(Engagement.name == name))
         if existing is None:
-            existing = Engagement(name=name)
+            existing = Engagement(name=name, nxc_workspace=workspace)
             session.add(existing)
-            session.commit()
-            session.refresh(existing)
+        elif existing.nxc_workspace != workspace:
+            existing.nxc_workspace = workspace
+        session.commit()
+        session.refresh(existing)
     cfg.current_engagement = name
     save_config(cfg)
+    nxc.ensure_workspace(workspace)
     try:
         write_env_file()
     except Exception:
@@ -74,13 +79,30 @@ def engagement_use(name: str) -> Engagement:
         existing = session.scalar(select(Engagement).where(Engagement.name == name))
         if existing is None:
             raise MissingEngagementError(f"Engagement '{name}' does not exist.")
+        workspace = existing.nxc_workspace or existing.name
     cfg = load_config()
     cfg.current_engagement = name
     save_config(cfg)
+    nxc.ensure_workspace(workspace)
     try:
         write_env_file()
     except Exception:
         pass
+    return existing
+
+
+def engagement_set_workspace(name: str, workspace: str) -> Engagement:
+    init_db()
+    with get_session() as session:
+        existing = session.scalar(select(Engagement).where(Engagement.name == name))
+        if existing is None:
+            raise MissingEngagementError(f"Engagement '{name}' does not exist.")
+        existing.nxc_workspace = workspace
+        session.commit()
+        session.refresh(existing)
+    cfg = load_config()
+    if cfg.current_engagement == name:
+        nxc.ensure_workspace(workspace)
     return existing
 
 
@@ -511,7 +533,7 @@ def write_env_file(shell: str = "zsh") -> Path:
     """Write current env exports to ~/.nihil-history/env.sh and return the path."""
     rows = list(env_exports())
     path = env_file_path()
-    lines = [f"# nihil-history env — auto-generated, do not edit\n"]
+    lines = [f"# nihil-history env - auto-generated, do not edit\n"]
     for key, value in rows:
         escaped = value.replace('"', '\\"')
         if shell == "fish":
@@ -543,7 +565,7 @@ def env_exports() -> Iterable[tuple[str, str]]:
         if selected_host.ip:
             yield ("TARGET", selected_host.ip)
             yield ("IP", selected_host.ip)
-        # Role-specific vars — each role maintains its own selected host
+        # Role-specific vars - each role maintains its own selected host
         for role_upper, host_id in (cfg.selected_role_hosts or {}).items():
             host = hosts_by_id.get(host_id)
             if host is None:

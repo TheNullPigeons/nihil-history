@@ -21,6 +21,7 @@ from nihil_history.services import (
     creds_list,
     engagement_init,
     engagement_list,
+    engagement_set_workspace,
     engagement_use,
     env_exports,
     write_env_file,
@@ -30,6 +31,7 @@ from nihil_history.services import (
     hosts_remove,
     hosts_set,
     hosts_list,
+    require_engagement,
 )
 from nihil_history.sync_nmap import import_nmap_xml
 from nihil_history.sync_nxc import import_nxc_db
@@ -59,7 +61,8 @@ def main(ctx: typer.Context) -> None:
     ensure_default_engagement()
     if ctx.invoked_subcommand != "sync":
         try:
-            import_nxc_db()
+            entry = require_engagement()
+            import_nxc_db(workspace_name=entry.nxc_workspace or entry.name)
         except Exception:
             pass
 
@@ -74,9 +77,12 @@ app.add_typer(export_app, name="export")
 
 
 @engagement_app.command("init")
-def cmd_engagement_init(name: str) -> None:
-    entry = engagement_init(name)
-    console.print(f"[green]Engagement ready:[/green] {entry.name}")
+def cmd_engagement_init(
+    name: str,
+    nxc_workspace: str = typer.Option(None, "--workspace", "-w", help="NXC workspace name (default: engagement name)"),
+) -> None:
+    entry = engagement_init(name, nxc_workspace=nxc_workspace)
+    console.print(f"[green]Engagement ready:[/green] {entry.name} [dim](nxc-ws: {entry.nxc_workspace})[/dim]")
 
 
 @engagement_app.command("use")
@@ -85,7 +91,24 @@ def cmd_engagement_use(name: str) -> None:
         entry = engagement_use(name)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
-    console.print(f"[green]Active engagement:[/green] {entry.name}")
+    console.print(f"[green]Active engagement:[/green] {entry.name} [dim](nxc-ws: {entry.nxc_workspace or entry.name})[/dim]")
+
+
+@engagement_app.command("set-workspace")
+def cmd_engagement_set_workspace(
+    workspace: str,
+    name: str = typer.Option(None, "--engagement", "-e", help="Engagement name (default: current)"),
+) -> None:
+    if name is None:
+        try:
+            name = require_engagement().name
+        except MissingEngagementError as exc:
+            _handle_missing_engagement(exc)
+    try:
+        entry = engagement_set_workspace(name, workspace)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    console.print(f"[green]Engagement[/green] {entry.name} [green]now linked to NXC workspace[/green] {entry.nxc_workspace}")
 
 
 @engagement_app.command("list")
@@ -94,9 +117,10 @@ def cmd_engagement_list() -> None:
     table = Table(title="Engagements")
     table.add_column("ID")
     table.add_column("Name")
+    table.add_column("NXC workspace")
     table.add_column("Created")
     for entry in entries:
-        table.add_row(str(entry.id), entry.name, entry.created_at.isoformat())
+        table.add_row(str(entry.id), entry.name, entry.nxc_workspace or "-", entry.created_at.isoformat())
     console.print(table)
 
 
@@ -345,17 +369,26 @@ def cmd_env_export(
 
 @sync_app.command("nxc")
 def cmd_sync_nxc(
-    workspace_path: str = typer.Option(None, "--workspace-path", "--workspace", "-w", help="Path to ~/.nxc/workspaces (default: ~/.nxc/workspaces)"),
+    workspace_path: str = typer.Option(None, "--workspace-path", help="Path to ~/.nxc/workspaces (default: ~/.nxc/workspaces)"),
+    workspace_name: str = typer.Option(None, "--workspace", "-w", help="Single NXC workspace to import (default: engagement-linked)"),
+    all_workspaces: bool = typer.Option(False, "--all", help="Import from all NXC workspaces (overrides engagement link)"),
 ) -> None:
+    if workspace_name is None and not all_workspaces:
+        try:
+            entry = require_engagement()
+            workspace_name = entry.nxc_workspace or entry.name
+        except MissingEngagementError as exc:
+            _handle_missing_engagement(exc)
     try:
-        result = import_nxc_db(workspace_path)
+        result = import_nxc_db(workspace_path, workspace_name=workspace_name)
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
+    scope = "all workspaces" if all_workspaces else f"workspace '{workspace_name}'"
     console.print(
-        f"[green]NXC sync complete:[/green] creds={result['creds']} hosts={result['hosts']} links={result['links']}"
+        f"[green]NXC sync complete[/green] [dim]({scope})[/dim]: creds={result['creds']} hosts={result['hosts']} links={result['links']}"
     )
 
 
@@ -368,7 +401,8 @@ def tui_main() -> None:
     init_db()
     ensure_default_engagement()
     try:
-        import_nxc_db()
+        entry = require_engagement()
+        import_nxc_db(workspace_name=entry.nxc_workspace or entry.name)
     except Exception:
         pass
     NihilHistoryTUI().run()

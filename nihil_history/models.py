@@ -20,6 +20,7 @@ class Engagement(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    nxc_workspace: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
 
     credentials: Mapped[list["Credential"]] = relationship(back_populates="engagement", cascade="all,delete")

@@ -133,14 +133,19 @@ def _extract_hosts(db_path: Path, query: str, source: str) -> list[dict]:
     return results
 
 
-def import_nxc_db(workspaces_path: str | None = None) -> dict[str, int]:
+def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None = None) -> dict[str, int]:
     root = Path(workspaces_path).expanduser() if workspaces_path else _DEFAULT_WORKSPACES.expanduser()
     if not root.exists():
         raise FileNotFoundError(f"NXC workspaces directory not found: {root}")
 
     added_creds = added_hosts = added_links = 0
 
-    for workspace in sorted(root.iterdir()):
+    if workspace_name:
+        candidates = [root / workspace_name]
+    else:
+        candidates = sorted(root.iterdir())
+
+    for workspace in candidates:
         if not workspace.is_dir():
             continue
         source = f"nxc:{workspace.name}"
