@@ -22,19 +22,31 @@ def _run(args: list[str]) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def list_workspaces() -> list[str]:
+    """Return all NXC workspaces. Empty list if nxcdb missing or fails."""
+    if not nxcdb_available():
+        return []
+    ok, out = _run(["-gw"])
+    if not ok:
+        return []
+    names: list[str] = []
+    for line in out.splitlines():
+        cleaned = line.lstrip(" *").strip()
+        if cleaned:
+            names.append(cleaned)
+    return names
+
+
 def get_workspace() -> str | None:
+    """Return active NXC workspace (line marked with '*'), or None."""
     if not nxcdb_available():
         return None
     ok, out = _run(["-gw"])
     if not ok:
         return None
     for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if ":" in line:
-            return line.split(":", 1)[1].strip()
-        return line
+        if line.lstrip().startswith("*"):
+            return line.lstrip(" *").strip()
     return None
 
 
@@ -53,11 +65,10 @@ def set_workspace(name: str) -> bool:
 
 
 def ensure_workspace(name: str) -> bool:
-    """Set workspace, creating it first if needed. Returns True on success."""
+    """Create workspace if missing, then set it active. Returns True on success."""
     if not nxcdb_available():
         return False
-    if set_workspace(name):
-        return True
-    if create_workspace(name):
-        return set_workspace(name)
-    return False
+    if name not in list_workspaces():
+        if not create_workspace(name):
+            return False
+    return set_workspace(name)
