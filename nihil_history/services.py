@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import json
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -542,6 +543,100 @@ def write_env_file(shell: str = "zsh") -> Path:
             lines.append(f'export {key}="{escaped}"\n')
     path.write_text("".join(lines), encoding="utf-8")
     return path
+
+
+_SHELL_BLOCK_BEGIN = "# >>> nihil-history shell integration >>>"
+_SHELL_BLOCK_END = "# <<< nihil-history shell integration <<<"
+
+
+def _shell_integration_block(env_path: Path) -> str:
+    src_line = f'[ -f "{env_path}" ] && source "{env_path}"'
+    return "\n".join([
+        _SHELL_BLOCK_BEGIN,
+        src_line,
+        "nhi() {",
+        '  command nhi "$@"',
+        f"  {src_line}",
+        "}",
+        "nhit() {",
+        '  command nhit "$@"',
+        f"  {src_line}",
+        "}",
+        "nihil-history() {",
+        '  command nihil-history "$@"',
+        f"  {src_line}",
+        "}",
+        _SHELL_BLOCK_END,
+        "",
+    ])
+
+
+def install_shell_integration(shell: str | None = None) -> Path:
+    """Append (or refresh) the auto-source block in the user's shell rc file.
+
+    Returns the rc file path that was patched.
+    """
+    import os
+    if shell is None:
+        shell = Path(os.environ.get("SHELL", "/bin/bash")).name
+
+    home = Path.home()
+    rc_map = {
+        "zsh": home / ".zshrc",
+        "bash": home / ".bashrc",
+    }
+    if shell not in rc_map:
+        raise ValueError(f"Unsupported shell '{shell}'. Use zsh or bash.")
+    rc_path = rc_map[shell]
+
+    env_path = env_file_path()
+    block = _shell_integration_block(env_path)
+
+    existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
+
+    if _SHELL_BLOCK_BEGIN in existing and _SHELL_BLOCK_END in existing:
+        before, _, rest = existing.partition(_SHELL_BLOCK_BEGIN)
+        _, _, after = rest.partition(_SHELL_BLOCK_END)
+        after = after.lstrip("\n")
+        new_content = before.rstrip("\n") + "\n\n" + block + after
+    else:
+        sep = "" if existing.endswith("\n") or not existing else "\n"
+        new_content = existing + sep + "\n" + block
+
+    rc_path.write_text(new_content, encoding="utf-8")
+    try:
+        write_env_file(shell=shell)
+    except Exception:
+        pass
+    return rc_path
+
+
+def uninstall_shell_integration(shell: str | None = None) -> Path | None:
+    """Remove the auto-source block from the user's shell rc file."""
+    import os
+
+    if shell is None:
+        shell = Path(os.environ.get("SHELL", "/bin/bash")).name
+
+    home = Path.home()
+    rc_map = {
+        "zsh": home / ".zshrc",
+        "bash": home / ".bashrc",
+    }
+    if shell not in rc_map:
+        raise ValueError(f"Unsupported shell '{shell}'. Use zsh or bash.")
+    rc_path = rc_map[shell]
+    if not rc_path.exists():
+        return None
+    existing = rc_path.read_text(encoding="utf-8")
+    if _SHELL_BLOCK_BEGIN not in existing:
+        return None
+    before, _, rest = existing.partition(_SHELL_BLOCK_BEGIN)
+    _, _, after = rest.partition(_SHELL_BLOCK_END)
+    after = after.lstrip("\n")
+    new_content = before.rstrip("\n") + ("\n" if after else "") + after
+    rc_path.write_text(new_content, encoding="utf-8")
+    return rc_path
 
 
 def env_exports() -> Iterable[tuple[str, str]]:

@@ -24,6 +24,8 @@ from nihil_history.services import (
     engagement_set_workspace,
     engagement_use,
     env_exports,
+    install_shell_integration,
+    uninstall_shell_integration,
     write_env_file,
     export_report_json,
     export_report_markdown,
@@ -365,6 +367,36 @@ def cmd_env_export(
         return
     console.print(f"[green]Written:[/green] {path}")
     console.print(f"[dim]Add to ~/.zshrc:[/dim]  source {path}")
+
+
+@env_app.command("install-shell")
+def cmd_env_install_shell(
+    shell: str = typer.Option(None, "--shell", help="Target shell (zsh|bash). Defaults to $SHELL."),
+) -> None:
+    """Patch ~/.zshrc or ~/.bashrc with auto-source + nhi/nhit/nihil-history wrappers."""
+    try:
+        rc_path = install_shell_integration(shell)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Shell integration installed in[/green] {rc_path}")
+    console.print("[dim]Open a new shell or run:[/dim]  exec $SHELL -l")
+
+
+@env_app.command("uninstall-shell")
+def cmd_env_uninstall_shell(
+    shell: str = typer.Option(None, "--shell", help="Target shell (zsh|bash). Defaults to $SHELL."),
+) -> None:
+    """Remove the nihil-history shell integration block."""
+    try:
+        rc_path = uninstall_shell_integration(shell)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    if rc_path is None:
+        console.print("[yellow]No nihil-history block found.[/yellow]")
+        return
+    console.print(f"[green]Shell integration removed from[/green] {rc_path}")
 
 
 @sync_app.command("nxc")
