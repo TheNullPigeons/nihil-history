@@ -370,14 +370,31 @@ def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str
         host = session.scalar(select(Host).where(Host.id == host_id, Host.engagement_id == eid))
         if host is None:
             raise ValueError(f"Host {host_id} not found in active engagement.")
+        old_role = (host.role or "").upper() or None
+        new_role = role.upper() if role else None
         host.ip = ip
         host.hostname = hostname
         host.domain = domain
         host.operating_system = operating_system
-        host.role = role.upper() if role else None
+        host.role = new_role
         session.commit()
         session.refresh(host)
-        return host
+
+    cfg = load_config()
+    changed = False
+    if old_role and cfg.selected_role_hosts.get(old_role) == host_id and old_role != new_role:
+        cfg.selected_role_hosts.pop(old_role, None)
+        changed = True
+    if new_role and cfg.selected_role_hosts.get(new_role) != host_id:
+        cfg.selected_role_hosts[new_role] = host_id
+        changed = True
+    if changed:
+        save_config(cfg)
+    try:
+        write_env_file()
+    except Exception:
+        pass
+    return host
 
 
 def access_link(cred_id: int, host_id: int, protocol: str, status: str, source: str = "manual") -> AccessLink:
