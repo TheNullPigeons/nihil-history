@@ -166,9 +166,15 @@ def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None
         for h in all_hosts:
             if not h["ip"]:
                 continue
-            if not _host_pair_exists(h["ip"], h["hostname"]):
+            if _host_pair_exists(h["ip"], h["hostname"]):
+                continue
+            try:
                 hosts_add(ip=h["ip"], hostname=h["hostname"], domain=h["domain"], operating_system=h.get("os"), source=h["source"])
-                added_hosts += 1
+            except ValueError:
+                # Drop the unusable field and retry once - upstream NXC sometimes stores
+                # whitespace-only or otherwise malformed domains we can't trust.
+                hosts_add(ip=h["ip"], hostname=h["hostname"], domain=None, operating_system=h.get("os"), source=h["source"])
+            added_hosts += 1
 
         seen_creds: set[tuple] = set()
         for c in all_creds:
@@ -180,14 +186,24 @@ def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None
             seen_creds.add(key)
             cred_id = _cred_exists(c["username"], c["domain"], c["password"], c["hash"])
             if cred_id is None:
-                cred = creds_add(
-                    username=c["username"],
-                    password=c["password"],
-                    hash=c["hash"],
-                    secret=None,
-                    domain=c["domain"],
-                    source=c["source"],
-                )
+                try:
+                    cred = creds_add(
+                        username=c["username"],
+                        password=c["password"],
+                        hash=c["hash"],
+                        secret=None,
+                        domain=c["domain"],
+                        source=c["source"],
+                    )
+                except ValueError:
+                    cred = creds_add(
+                        username=c["username"],
+                        password=c["password"],
+                        hash=c["hash"],
+                        secret=None,
+                        domain=None,
+                        source=c["source"],
+                    )
                 cred_id = cred.id
                 added_creds += 1
 
