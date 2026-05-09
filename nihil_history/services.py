@@ -547,17 +547,28 @@ def export_report_markdown(include_secrets: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _shell_single_quote(value: str) -> str:
+    """POSIX-safe single-quote escaping (bash/zsh): foo'bar -> 'foo'\\''bar'"""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _fish_single_quote(value: str) -> str:
+    """fish single-quote escaping: only ' and \\ need escaping inside single quotes."""
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def write_env_file(shell: str = "zsh") -> Path:
     """Write current env exports to ~/.nihil-history/env.sh and return the path."""
     rows = list(env_exports())
     path = env_file_path()
-    lines = [f"# nihil-history env - auto-generated, do not edit\n"]
+    lines = ["# nihil-history env - auto-generated, do not edit\n"]
     for key, value in rows:
-        escaped = value.replace('"', '\\"')
         if shell == "fish":
-            lines.append(f'set -gx {key} "{escaped}"\n')
+            quoted = _fish_single_quote(value)
+            lines.append(f"set -gx {key} {quoted}\n")
         else:
-            lines.append(f'export {key}="{escaped}"\n')
+            quoted = _shell_single_quote(value)
+            lines.append(f"export {key}={quoted}\n")
     path.write_text("".join(lines), encoding="utf-8")
     return path
 
