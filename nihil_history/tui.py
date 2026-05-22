@@ -555,7 +555,7 @@ class NihilHistoryTUI(App[None]):
                 callback=self._on_add_target,
             )
         else:
-            self._set_status("Use 'l' to add an access link from matrix tab.")
+            self._set_status("Use 'L' to add an access link from matrix tab.")
             return
 
     def action_delete_item(self) -> None:
