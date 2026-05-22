@@ -9,7 +9,7 @@ from sqlalchemy import select
 from nihil_history.config import env_file_path, key_path, load_config, save_config
 from nihil_history.crypto import decrypt_secret, encrypt_secret, load_or_create_key
 from nihil_history.db import get_session, init_db
-from nihil_history.models import AccessLink, Credential, Engagement, Host
+from nihil_history.models import AccessLink, Credential, Engagement, Host, Target
 from nihil_history import nxc
 from nihil_history.validators import (
     validate_domain,
@@ -150,6 +150,7 @@ def engagement_merge(src_name: str, dst_name: str) -> Engagement:
         session.execute(sa_update(Credential).where(Credential.engagement_id == src.id).values(engagement_id=dst.id))
         session.execute(sa_update(Host).where(Host.engagement_id == src.id).values(engagement_id=dst.id))
         session.execute(sa_update(AccessLink).where(AccessLink.engagement_id == src.id).values(engagement_id=dst.id))
+        session.execute(sa_update(Target).where(Target.engagement_id == src.id).values(engagement_id=dst.id))
         session.delete(src)
         session.commit()
         session.refresh(dst)
@@ -461,6 +462,87 @@ def access_update(link_id: int, cred_id: int, host_id: int, protocol: str, statu
         return link
 
 
+def targets_add(
+    name: str,
+    user: str | None,
+    group: str | None,
+    object_: str | None,
+    computer: str | None,
+) -> Target:
+    init_db()
+    with get_session() as session:
+        target = Target(
+            engagement_id=_engagement_id(),
+            name=name,
+            user=user or None,
+            group=group or None,
+            object=object_ or None,
+            computer=computer or None,
+        )
+        session.add(target)
+        session.commit()
+        session.refresh(target)
+        return target
+
+
+def targets_list() -> list[Target]:
+    with get_session() as session:
+        return list(session.scalars(select(Target).where(Target.engagement_id == _engagement_id()).order_by(Target.id)).all())
+
+
+def targets_set(target_id: int) -> Target:
+    eid = _engagement_id()
+    with get_session() as session:
+        target = session.scalar(select(Target).where(Target.id == target_id, Target.engagement_id == eid))
+        if target is None:
+            raise ValueError(f"Target {target_id} not found in active engagement.")
+    cfg = load_config()
+    cfg.selected_target_id = target_id
+    save_config(cfg)
+    try:
+        write_env_file()
+    except Exception:
+        pass
+    return target
+
+
+def targets_remove(target_id: int) -> None:
+    eid = _engagement_id()
+    with get_session() as session:
+        target = session.scalar(select(Target).where(Target.id == target_id, Target.engagement_id == eid))
+        if target is None:
+            raise ValueError(f"Target {target_id} not found in active engagement.")
+        session.delete(target)
+        session.commit()
+    cfg = load_config()
+    if cfg.selected_target_id == target_id:
+        cfg.selected_target_id = None
+        save_config(cfg)
+
+
+def targets_update(
+    target_id: int,
+    name: str,
+    user: str | None,
+    group: str | None,
+    object_: str | None,
+    computer: str | None,
+) -> Target:
+    eid = _engagement_id()
+    with get_session() as session:
+        target = session.scalar(select(Target).where(Target.id == target_id, Target.engagement_id == eid))
+        if target is None:
+            raise ValueError(f"Target {target_id} not found in active engagement.")
+        target.name = name
+        target.user = user or None
+        target.group = group or None
+        target.object = object_ or None
+        target.computer = computer or None
+        session.commit()
+        session.refresh(target)
+        return target
+
+
 def access_matrix() -> tuple[list[Host], list[Credential], dict[tuple[int, int], str]]:
     hosts = hosts_list()
     creds = creds_list()
@@ -670,6 +752,7 @@ def uninstall_shell_integration(shell: str | None = None) -> Path | None:
 def env_exports() -> Iterable[tuple[str, str]]:
     creds = creds_list()
     hosts = hosts_list()
+    tgts = targets_list()
     cfg = load_config()
 
     if creds:
@@ -698,3 +781,13 @@ def env_exports() -> Iterable[tuple[str, str]]:
                     yield ("DC_IP", host.ip)
                 if host.hostname:
                     yield ("DC_HOST", host.hostname)
+    if tgts:
+        selected_target = next((t for t in tgts if t.id == cfg.selected_target_id), tgts[-1])
+        if selected_target.user:
+            yield ("TARGET_USER", selected_target.user)
+        if selected_target.group:
+            yield ("TARGET_GROUP", selected_target.group)
+        if selected_target.object:
+            yield ("TARGET_OBJECT", selected_target.object)
+        if selected_target.computer:
+            yield ("TARGET_COMPUTER", selected_target.computer)

@@ -32,6 +32,11 @@ from nihil_history.services import (
     hosts_remove,
     hosts_set,
     hosts_update,
+    targets_add,
+    targets_list,
+    targets_remove,
+    targets_set,
+    targets_update,
 )
 from nihil_history.validators import (
     ALLOWED_PROTOCOLS,
@@ -44,6 +49,7 @@ class SelectionState:
     creds: list = None
     hosts: list = None
     links: list = None
+    targets: list = None
 
 
 class QuickInputScreen(ModalScreen[str | None]):
@@ -376,7 +382,8 @@ class NihilHistoryTUI(App[None]):
         Binding("ctrl+e", "engagement", "Engagement"),
         Binding("1", "tab_creds", "Credentials"),
         Binding("2", "tab_hosts", "Hosts"),
-        Binding("3", "tab_matrix", "Matrix"),
+        Binding("3", "tab_targets", "Targets"),
+        Binding("4", "tab_matrix", "Matrix"),
         Binding("a", "add_item", "Add"),
         Binding("d", "delete_item", "Delete"),
         Binding("e", "edit_item", "Edit"),
@@ -413,10 +420,11 @@ class NihilHistoryTUI(App[None]):
     """
 
     def compose(self) -> ComposeResult:
-        self.state = SelectionState(creds=[], hosts=[], links=[])
+        self.state = SelectionState(creds=[], hosts=[], links=[], targets=[])
         self._vis_creds: list = []
         self._vis_hosts: list = []
         self._vis_links: list = []
+        self._vis_targets: list = []
         self._search_query: str = ""
         self._visual_mode: bool = False
         self._visual_anchor: int = 0
@@ -429,6 +437,8 @@ class NihilHistoryTUI(App[None]):
                     yield DataTable(id="creds_table", cursor_type="row")
                 with TabPane("Hosts", id="hosts"):
                     yield DataTable(id="hosts_table", cursor_type="row")
+                with TabPane("Targets", id="targets"):
+                    yield DataTable(id="targets_table", cursor_type="row")
                 with TabPane("Access Matrix", id="matrix"):
                     yield DataTable(id="matrix_table", cursor_type="row")
         yield Footer()
@@ -471,7 +481,7 @@ class NihilHistoryTUI(App[None]):
         except Exception as exc:
             self._set_status(f"Engagement error: {exc}")
 
-    _TABS = ["creds", "hosts", "matrix"]
+    _TABS = ["creds", "hosts", "targets", "matrix"]
 
     def action_tab_creds(self) -> None:
         self.query_one(TabbedContent).active = "creds"
@@ -481,6 +491,9 @@ class NihilHistoryTUI(App[None]):
 
     def action_tab_matrix(self) -> None:
         self.query_one(TabbedContent).active = "matrix"
+
+    def action_tab_targets(self) -> None:
+        self.query_one(TabbedContent).active = "targets"
 
     def action_tab_prev(self) -> None:
         tc = self.query_one(TabbedContent)
@@ -526,6 +539,20 @@ class NihilHistoryTUI(App[None]):
                     ],
                 ),
                 callback=self._on_add_host,
+            )
+        elif active == "targets":
+            self.push_screen(
+                MultiFieldScreen(
+                    "Add target",
+                    [
+                        ("Name *", "admin-hunt", ""),
+                        ("User  (TARGET_USER)", "jdoe", ""),
+                        ("Group  (TARGET_GROUP)", "Domain Admins", ""),
+                        ("Object  (TARGET_OBJECT)", "cn=...", ""),
+                        ("Computer  (TARGET_COMPUTER)", "DC01", ""),
+                    ],
+                ),
+                callback=self._on_add_target,
             )
         else:
             self._set_status("Use 'l' to add an access link from matrix tab.")
@@ -579,6 +606,14 @@ class NihilHistoryTUI(App[None]):
             self.push_screen(
                 QuickInputScreen(f"Delete link id={selected.id}? Type y", "y"),
                 callback=lambda raw: self._confirm_delete(raw, "matrix", selected.id),
+            )
+        elif active == "targets":
+            selected = self._selected_target()
+            if selected is None:
+                return
+            self.push_screen(
+                QuickInputScreen(f"Delete target id={selected.id} '{selected.name}'? Type y", "y"),
+                callback=lambda raw: self._confirm_delete(raw, "targets", selected.id),
             )
 
     def action_edit_item(self) -> None:
@@ -634,6 +669,23 @@ class NihilHistoryTUI(App[None]):
                 ),
                 callback=lambda values: self._on_edit_link(values, selected.id),
             )
+        elif active == "targets":
+            selected = self._selected_target()
+            if selected is None:
+                return
+            self.push_screen(
+                MultiFieldScreen(
+                    "Edit target",
+                    [
+                        ("Name *", "admin-hunt", selected.name),
+                        ("User  (TARGET_USER)", "jdoe", selected.user or ""),
+                        ("Group  (TARGET_GROUP)", "Domain Admins", selected.group or ""),
+                        ("Object  (TARGET_OBJECT)", "cn=...", selected.object or ""),
+                        ("Computer  (TARGET_COMPUTER)", "DC01", selected.computer or ""),
+                    ],
+                ),
+                callback=lambda values: self._on_edit_target(values, selected.id),
+            )
 
     def action_set_item(self) -> None:
         active = self.query_one(TabbedContent).active
@@ -649,8 +701,14 @@ class NihilHistoryTUI(App[None]):
                 return
             hosts_set(selected.id)
             self.notify(f"Host set: {selected.ip or selected.hostname or '-'} (id={selected.id})", title="Set", severity="information")
+        elif active == "targets":
+            selected = self._selected_target()
+            if selected is None:
+                return
+            targets_set(selected.id)
+            self.notify(f"Target set: {selected.name} (id={selected.id})", title="Set", severity="information")
         else:
-            self._set_status("Set is available on credentials and hosts tabs.")
+            self._set_status("Set is available on credentials, hosts, and targets tabs.")
             return
         self._refresh_all()
 
@@ -740,7 +798,7 @@ class NihilHistoryTUI(App[None]):
 
     def _active_table(self) -> DataTable | None:
         active = self.query_one(TabbedContent).active
-        table_id = {"creds": "creds_table", "hosts": "hosts_table", "matrix": "matrix_table"}.get(active)
+        table_id = {"creds": "creds_table", "hosts": "hosts_table", "matrix": "matrix_table", "targets": "targets_table"}.get(active)
         return self.query_one(f"#{table_id}", DataTable) if table_id else None
 
     def action_vi_down(self) -> None:
@@ -803,13 +861,21 @@ class NihilHistoryTUI(App[None]):
             links = [lnk for lnk in self.state.links if
                      q in lnk.protocol.lower() or
                      q in lnk.status.lower()]
+            tgts = [t for t in (self.state.targets or []) if
+                    q in t.name.lower() or
+                    q in (t.user or "").lower() or
+                    q in (t.group or "").lower() or
+                    q in (t.object or "").lower() or
+                    q in (t.computer or "").lower()]
         else:
             creds = self.state.creds
             hosts = self.state.hosts
             links = self.state.links
+            tgts = self.state.targets or []
         self._render_creds(creds)
         self._render_hosts(hosts)
         self._render_matrix(links)
+        self._render_targets(tgts)
 
     @on(Input.Changed, "#search_bar")
     def _on_search_changed(self, event: Input.Changed) -> None:
@@ -849,6 +915,12 @@ class NihilHistoryTUI(App[None]):
             if selected is None:
                 return
             hosts_set(selected.id)
+            self.exit()
+        elif active == "targets":
+            selected = self._selected_target()
+            if selected is None:
+                return
+            targets_set(selected.id)
             self.exit()
         else:
             selected = self._selected_link()
@@ -957,6 +1029,43 @@ class NihilHistoryTUI(App[None]):
         except Exception as exc:
             self._set_status(f"Edit link failed: {exc}")
 
+    def _on_add_target(self, values: list[str] | None) -> None:
+        if values is None:
+            return
+        try:
+            name, user, group, object_, computer = values
+            if not name:
+                self._set_status("Target name is required.")
+                return
+            target = targets_add(name=name, user=user or None, group=group or None, object_=object_ or None, computer=computer or None)
+            self.notify(f"'{target.name}' added (id={target.id})", title="Target added", severity="information")
+            self._refresh_all()
+        except MissingEngagementError:
+            self.notify("No active engagement.", title="Error", severity="error")
+        except Exception as exc:
+            self.notify(str(exc), title="Add target failed", severity="error", markup=False)
+
+    def _on_edit_target(self, values: list[str] | None, target_id: int) -> None:
+        if values is None:
+            return
+        try:
+            name, user, group, object_, computer = values
+            if not name:
+                self._set_status("Target name is required.")
+                return
+            targets_update(
+                target_id=target_id,
+                name=name,
+                user=user or None,
+                group=group or None,
+                object_=object_ or None,
+                computer=computer or None,
+            )
+            self.notify(f"Target id={target_id} updated", title="Edited", severity="information")
+            self._refresh_all()
+        except Exception as exc:
+            self.notify(str(exc), title="Edit target failed", severity="error", markup=False)
+
     def _confirm_delete_many(self, raw: str | None, entity: str, ids: list[int]) -> None:
         self._exit_visual_mode()
         if (raw or "").upper() not in ("Y", "YES"):
@@ -967,6 +1076,8 @@ class NihilHistoryTUI(App[None]):
             try:
                 if entity == "creds":
                     creds_remove(eid)
+                elif entity == "hosts":
+                    hosts_remove(eid)
                 else:
                     hosts_remove(eid)
             except Exception as exc:
@@ -985,6 +1096,8 @@ class NihilHistoryTUI(App[None]):
                 creds_remove(entity_id)
             elif entity == "hosts":
                 hosts_remove(entity_id)
+            elif entity == "targets":
+                targets_remove(entity_id)
             else:
                 access_remove(entity_id)
             self.notify(f"{entity.rstrip('s')} id={entity_id} deleted", title="Deleted", severity="warning")
@@ -997,6 +1110,7 @@ class NihilHistoryTUI(App[None]):
             creds = creds_list()
             hosts = hosts_list()
             links = access_list()
+            tgts = targets_list()
         except MissingEngagementError as exc:
             self._set_status(str(exc))
             self._render_empty()
@@ -1005,13 +1119,16 @@ class NihilHistoryTUI(App[None]):
         prev_creds = self.query_one("#creds_table", DataTable).cursor_row
         prev_hosts = self.query_one("#hosts_table", DataTable).cursor_row
         prev_matrix = self.query_one("#matrix_table", DataTable).cursor_row
+        prev_targets = self.query_one("#targets_table", DataTable).cursor_row
 
         self.state.creds = creds
         self.state.hosts = hosts
         self.state.links = links
+        self.state.targets = tgts
         self._render_creds(creds)
         self._render_hosts(hosts)
         self._render_matrix(links)
+        self._render_targets(tgts)
 
         if creds:
             self.query_one("#creds_table", DataTable).move_cursor(row=max(0, min(prev_creds, len(creds) - 1)))
@@ -1019,17 +1136,19 @@ class NihilHistoryTUI(App[None]):
             self.query_one("#hosts_table", DataTable).move_cursor(row=max(0, min(prev_hosts, len(hosts) - 1)))
         if links:
             self.query_one("#matrix_table", DataTable).move_cursor(row=max(0, min(prev_matrix, len(links) - 1)))
+        if tgts:
+            self.query_one("#targets_table", DataTable).move_cursor(row=max(0, min(prev_targets, len(tgts) - 1)))
         if status_message:
             self._set_status(status_message)
         else:
             self._set_status(
                 "Loaded: "
-                f"creds={len(creds)} hosts={len(hosts)} links={len(links)} | "
-                "Keys: h/l tabs, 1/2/3 switch, a add, e edit, d delete, s set, L link, / search, ? allowed values, Enter details, r refresh, q quit"
+                f"creds={len(creds)} hosts={len(hosts)} links={len(links)} targets={len(tgts)} | "
+                "Keys: h/l tabs, 1/2/3/4 switch, a add, e edit, d delete, s set, L link, / search, ? allowed values, Enter details, r refresh, q quit"
             )
 
     def _render_empty(self) -> None:
-        for table_id in ("creds_table", "hosts_table", "matrix_table"):
+        for table_id in ("creds_table", "hosts_table", "matrix_table", "targets_table"):
             table = self.query_one(f"#{table_id}", DataTable)
             table.clear(columns=True)
             table.add_column("Info")
@@ -1115,4 +1234,32 @@ class NihilHistoryTUI(App[None]):
             self._set_status("No access row selected.")
             return None
         return self._vis_links[idx]
+
+    def _render_targets(self, targets: list) -> None:
+        self._vis_targets = targets
+        table = self.query_one("#targets_table", DataTable)
+        table.clear(columns=True)
+        table.add_column("ID")
+        table.add_column("Name")
+        table.add_column("TARGET_USER")
+        table.add_column("TARGET_GROUP")
+        table.add_column("TARGET_OBJECT")
+        table.add_column("TARGET_COMPUTER")
+        for target in targets:
+            table.add_row(
+                str(target.id),
+                target.name,
+                target.user or "-",
+                target.group or "-",
+                target.object or "-",
+                target.computer or "-",
+            )
+
+    def _selected_target(self):
+        table = self.query_one("#targets_table", DataTable)
+        idx = table.cursor_row
+        if idx is None or idx < 0 or idx >= len(self._vis_targets):
+            self._set_status("No target row selected.")
+            return None
+        return self._vis_targets[idx]
 

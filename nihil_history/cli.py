@@ -34,6 +34,11 @@ from nihil_history.services import (
     hosts_set,
     hosts_list,
     require_engagement,
+    targets_add,
+    targets_list,
+    targets_remove,
+    targets_set,
+    targets_update,
 )
 from nihil_history.sync_nmap import import_nmap_xml
 from nihil_history.sync_nxc import import_nxc_db
@@ -43,6 +48,7 @@ app = typer.Typer(no_args_is_help=True, help="nihil-history CLI")
 engagement_app = typer.Typer(no_args_is_help=True, help="Manage engagements.")
 creds_app = typer.Typer(no_args_is_help=True, help="Manage credentials.")
 hosts_app = typer.Typer(no_args_is_help=True, help="Manage hosts.")
+targets_app = typer.Typer(no_args_is_help=True, help="Manage AD targets.")
 access_app = typer.Typer(no_args_is_help=True, help="Manage access links.")
 env_app = typer.Typer(no_args_is_help=True, help="Print environment exports.")
 sync_app = typer.Typer(no_args_is_help=True, help="Synchronize from external tools.")
@@ -72,6 +78,7 @@ def main(ctx: typer.Context) -> None:
 app.add_typer(engagement_app, name="engagement")
 app.add_typer(creds_app, name="creds")
 app.add_typer(hosts_app, name="hosts")
+app.add_typer(targets_app, name="targets")
 app.add_typer(access_app, name="access")
 app.add_typer(env_app, name="env")
 app.add_typer(sync_app, name="sync")
@@ -259,6 +266,66 @@ def cmd_hosts_rm(host_id: int = typer.Option(..., "--id")) -> None:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
     console.print(f"[green]Host removed:[/green] id={host_id}")
+
+
+@targets_app.command("add")
+def cmd_targets_add(
+    name: str = typer.Option(..., "--name", "-n"),
+    user: str | None = typer.Option(None, "--user", "-u", help="TARGET_USER"),
+    group: str | None = typer.Option(None, "--group", "-g", help="TARGET_GROUP"),
+    object_: str | None = typer.Option(None, "--object", "-o", help="TARGET_OBJECT"),
+    computer: str | None = typer.Option(None, "--computer", "-c", help="TARGET_COMPUTER"),
+) -> None:
+    try:
+        target = targets_add(name=name, user=user, group=group, object_=object_, computer=computer)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Target added:[/green] id={target.id} name={target.name}")
+
+
+@targets_app.command("list")
+def cmd_targets_list() -> None:
+    try:
+        entries = targets_list()
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    table = Table(title="Targets")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("TARGET_USER")
+    table.add_column("TARGET_GROUP")
+    table.add_column("TARGET_OBJECT")
+    table.add_column("TARGET_COMPUTER")
+    for t in entries:
+        table.add_row(str(t.id), t.name, t.user or "-", t.group or "-", t.object or "-", t.computer or "-")
+    console.print(table)
+
+
+@targets_app.command("set")
+def cmd_targets_set(target_id: int = typer.Option(..., "--id")) -> None:
+    try:
+        target = targets_set(target_id)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Selected target:[/green] id={target.id} name={target.name}")
+
+
+@targets_app.command("rm")
+def cmd_targets_rm(target_id: int = typer.Option(..., "--id")) -> None:
+    try:
+        targets_remove(target_id)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Target removed:[/green] id={target_id}")
 
 
 @hosts_app.command("import-nmap")

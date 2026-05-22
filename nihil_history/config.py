@@ -15,6 +15,7 @@ class AppConfig:
     selected_cred_id: int | None = None
     selected_host_id: int | None = None
     selected_role_hosts: dict = None  # role (uppercase) -> host_id
+    selected_target_id: int | None = None
     encryption_enabled: bool = False
 
     def __post_init__(self):
@@ -91,6 +92,7 @@ def load_config() -> AppConfig:
     selected_cred_id = raw.get("selected_cred_id")
     selected_host_id = raw.get("selected_host_id")
     selected_role_hosts = raw.get("selected_role_hosts") or {}
+    selected_target_id = raw.get("selected_target_id")
     encryption_enabled = bool(raw.get("encryption_enabled", os.environ.get("NIHIL_HISTORY_ENCRYPTION", "0") == "1"))
     return AppConfig(
         db_path=db_path,
@@ -98,6 +100,7 @@ def load_config() -> AppConfig:
         selected_cred_id=selected_cred_id,
         selected_host_id=selected_host_id,
         selected_role_hosts=selected_role_hosts,
+        selected_target_id=selected_target_id,
         encryption_enabled=encryption_enabled,
     )
 
@@ -110,6 +113,7 @@ def save_config(config: AppConfig) -> None:
         "selected_cred_id": config.selected_cred_id,
         "selected_host_id": config.selected_host_id,
         "selected_role_hosts": config.selected_role_hosts,
+        "selected_target_id": config.selected_target_id,
         "encryption_enabled": config.encryption_enabled,
     }
     try:

@@ -26,6 +26,7 @@ class Engagement(Base):
     credentials: Mapped[list["Credential"]] = relationship(back_populates="engagement", cascade="all,delete")
     hosts: Mapped[list["Host"]] = relationship(back_populates="engagement", cascade="all,delete")
     links: Mapped[list["AccessLink"]] = relationship(back_populates="engagement", cascade="all,delete")
+    targets: Mapped[list["Target"]] = relationship(back_populates="engagement", cascade="all,delete")
 
 
 class Credential(Base):
@@ -76,3 +77,18 @@ class AccessLink(Base):
     engagement: Mapped["Engagement"] = relationship(back_populates="links")
     credential: Mapped["Credential"] = relationship()
     host: Mapped["Host"] = relationship()
+
+
+class Target(Base):
+    __tablename__ = "targets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    user: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    group: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    object: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    computer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
+
+    engagement: Mapped["Engagement"] = relationship(back_populates="targets")
