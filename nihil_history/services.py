@@ -468,6 +468,7 @@ def targets_add(
     group: str | None,
     object_: str | None,
     computer: str | None,
+    domain: str | None = None,
 ) -> Target:
     init_db()
     with get_session() as session:
@@ -478,6 +479,7 @@ def targets_add(
             group=group or None,
             object=object_ or None,
             computer=computer or None,
+            domain=domain or None,
         )
         session.add(target)
         session.commit()
@@ -527,6 +529,7 @@ def targets_update(
     group: str | None,
     object_: str | None,
     computer: str | None,
+    domain: str | None = None,
 ) -> Target:
     eid = _engagement_id()
     with get_session() as session:
@@ -538,6 +541,7 @@ def targets_update(
         target.group = group or None
         target.object = object_ or None
         target.computer = computer or None
+        target.domain = domain or None
         session.commit()
         session.refresh(target)
         return target
@@ -791,3 +795,5 @@ def env_exports() -> Iterable[tuple[str, str]]:
             yield ("TARGET_OBJECT", selected_target.object)
         if selected_target.computer:
             yield ("TARGET_COMPUTER", selected_target.computer)
+        if selected_target.domain:
+            yield ("TARGET_DOMAIN", selected_target.domain)

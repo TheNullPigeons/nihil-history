@@ -550,6 +550,7 @@ class NihilHistoryTUI(App[None]):
                         ("Group  (TARGET_GROUP)", "Domain Admins", ""),
                         ("Object  (TARGET_OBJECT)", "cn=...", ""),
                         ("Computer  (TARGET_COMPUTER)", "DC01", ""),
+                        ("Domain  (TARGET_DOMAIN)", "serval.int", ""),
                     ],
                 ),
                 callback=self._on_add_target,
@@ -682,6 +683,7 @@ class NihilHistoryTUI(App[None]):
                         ("Group  (TARGET_GROUP)", "Domain Admins", selected.group or ""),
                         ("Object  (TARGET_OBJECT)", "cn=...", selected.object or ""),
                         ("Computer  (TARGET_COMPUTER)", "DC01", selected.computer or ""),
+                        ("Domain  (TARGET_DOMAIN)", "serval.int", selected.domain or ""),
                     ],
                 ),
                 callback=lambda values: self._on_edit_target(values, selected.id),
@@ -866,7 +868,8 @@ class NihilHistoryTUI(App[None]):
                     q in (t.user or "").lower() or
                     q in (t.group or "").lower() or
                     q in (t.object or "").lower() or
-                    q in (t.computer or "").lower()]
+                    q in (t.computer or "").lower() or
+                    q in (t.domain or "").lower()]
         else:
             creds = self.state.creds
             hosts = self.state.hosts
@@ -1033,11 +1036,11 @@ class NihilHistoryTUI(App[None]):
         if values is None:
             return
         try:
-            name, user, group, object_, computer = values
+            name, user, group, object_, computer, domain = values
             if not name:
                 self._set_status("Target name is required.")
                 return
-            target = targets_add(name=name, user=user or None, group=group or None, object_=object_ or None, computer=computer or None)
+            target = targets_add(name=name, user=user or None, group=group or None, object_=object_ or None, computer=computer or None, domain=domain or None)
             self.notify(f"'{target.name}' added (id={target.id})", title="Target added", severity="information")
             self._refresh_all()
         except MissingEngagementError:
@@ -1049,7 +1052,7 @@ class NihilHistoryTUI(App[None]):
         if values is None:
             return
         try:
-            name, user, group, object_, computer = values
+            name, user, group, object_, computer, domain = values
             if not name:
                 self._set_status("Target name is required.")
                 return
@@ -1060,6 +1063,7 @@ class NihilHistoryTUI(App[None]):
                 group=group or None,
                 object_=object_ or None,
                 computer=computer or None,
+                domain=domain or None,
             )
             self.notify(f"Target id={target_id} updated", title="Edited", severity="information")
             self._refresh_all()
@@ -1245,6 +1249,7 @@ class NihilHistoryTUI(App[None]):
         table.add_column("TARGET_GROUP")
         table.add_column("TARGET_OBJECT")
         table.add_column("TARGET_COMPUTER")
+        table.add_column("TARGET_DOMAIN")
         for target in targets:
             table.add_row(
                 str(target.id),
@@ -1253,6 +1258,7 @@ class NihilHistoryTUI(App[None]):
                 target.group or "-",
                 target.object or "-",
                 target.computer or "-",
+                target.domain or "-",
             )
 
     def _selected_target(self):
