@@ -769,6 +769,8 @@ def env_exports() -> Iterable[tuple[str, str]]:
             yield ("NT_HASH", selected_cred.hash)
         if selected_cred.domain:
             yield ("DOMAIN", selected_cred.domain)
+            # LDAP base DN derived from the domain: example.com -> DC=example,DC=com
+            yield ("BASE_DN", "DC=" + selected_cred.domain.replace(".", ",DC="))
     if hosts:
         hosts_by_id = {h.id: h for h in hosts}
         selected_host = hosts_by_id.get(cfg.selected_host_id) or hosts[-1]
