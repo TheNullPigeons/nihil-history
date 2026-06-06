@@ -391,6 +391,8 @@ class NihilHistoryTUI(App[None]):
         Binding("L", "link_item", "Link"),
         Binding("ctrl+d", "toggle_dc", "DC", show=False),
         Binding("v", "visual_toggle", "Visual", show=False),
+        Binding("y", "yank", "Yank", show=False),
+        Binding("p", "paste", "Paste", show=False),
         Binding("?", "show_allowed_values", "?"),
         Binding("enter", "show_details", "Set+Quit"),
         Binding("j", "vi_down", "↓", show=False),
@@ -754,6 +756,50 @@ class NihilHistoryTUI(App[None]):
             self._refresh_all()
         except Exception as exc:
             self.notify(str(exc), title="Toggle DC failed", severity="error", markup=False)
+
+    def action_yank(self) -> None:
+        """Copy the selected row into the yank buffer (vim-style y, paste with p)."""
+        active = self.query_one(TabbedContent).active
+        getter = {
+            "creds": self._selected_cred,
+            "hosts": self._selected_host,
+            "targets": self._selected_target,
+            "matrix": self._selected_link,
+        }.get(active)
+        if getter is None:
+            return
+        selected = getter()
+        if selected is None:
+            return
+        self._yank = (active, selected)
+        self._set_status(f"Yanked {active} id={selected.id} - press p to paste a copy")
+
+    def action_paste(self) -> None:
+        """Paste the yank buffer as a new entry of the same kind."""
+        yanked = getattr(self, "_yank", None)
+        if not yanked:
+            self._set_status("Nothing to paste - press y on a row first")
+            return
+        kind, obj = yanked
+        try:
+            if kind == "creds":
+                creds_add(username=obj.username, password=obj.password, hash=obj.hash,
+                          secret=obj.secret, domain=obj.domain, source="yank")
+            elif kind == "hosts":
+                hosts_add(ip=obj.ip, hostname=obj.hostname, domain=obj.domain,
+                          operating_system=obj.operating_system, role=obj.role, source="yank")
+            elif kind == "targets":
+                targets_add(name=obj.name, user=obj.user, group=obj.group,
+                            object_=obj.object, computer=obj.computer, domain=obj.domain)
+            elif kind == "matrix":
+                access_link(cred_id=obj.cred_id, host_id=obj.host_id,
+                            protocol=obj.protocol, status=obj.status, source="yank")
+            else:
+                return
+        except Exception as exc:
+            self.notify(str(exc), title="Paste failed", severity="error", markup=False)
+            return
+        self._refresh_all(f"Pasted a copy of {kind} id={obj.id}")
 
     def action_visual_toggle(self) -> None:
         active = self.query_one(TabbedContent).active
