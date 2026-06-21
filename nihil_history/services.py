@@ -761,16 +761,15 @@ def env_exports() -> Iterable[tuple[str, str]]:
 
     if creds:
         selected_cred = next((c for c in creds if c.id == cfg.selected_cred_id), creds[-1])
-        if selected_cred.username:
-            yield ("USER", selected_cred.username)
-        if selected_cred.password:
-            yield ("PASSWORD", selected_cred.password)
-        if selected_cred.hash:
-            yield ("NT_HASH", selected_cred.hash)
+        yield ("USER", selected_cred.username or "")
+        yield ("PASSWORD", selected_cred.password or "")
+        yield ("NT_HASH", selected_cred.hash or "")
+        yield ("DOMAIN", selected_cred.domain or "")
         if selected_cred.domain:
-            yield ("DOMAIN", selected_cred.domain)
             # LDAP base DN derived from the domain: example.com -> DC=example,DC=com
             yield ("BASE_DN", "DC=" + selected_cred.domain.replace(".", ",DC="))
+        else:
+            yield ("BASE_DN", "")
     if hosts:
         hosts_by_id = {h.id: h for h in hosts}
         selected_host = hosts_by_id.get(cfg.selected_host_id) or hosts[-1]
@@ -789,13 +788,8 @@ def env_exports() -> Iterable[tuple[str, str]]:
                     yield ("DC_HOST", host.hostname)
     if tgts:
         selected_target = next((t for t in tgts if t.id == cfg.selected_target_id), tgts[-1])
-        if selected_target.user:
-            yield ("TARGET_USER", selected_target.user)
-        if selected_target.group:
-            yield ("TARGET_GROUP", selected_target.group)
-        if selected_target.object:
-            yield ("TARGET_OBJECT", selected_target.object)
-        if selected_target.computer:
-            yield ("TARGET_COMPUTER", selected_target.computer)
-        if selected_target.domain:
-            yield ("TARGET_DOMAIN", selected_target.domain)
+        yield ("TARGET_USER", selected_target.user or "")
+        yield ("TARGET_GROUP", selected_target.group or "")
+        yield ("TARGET_OBJECT", selected_target.object or "")
+        yield ("TARGET_COMPUTER", selected_target.computer or "")
+        yield ("TARGET_DOMAIN", selected_target.domain or "")
