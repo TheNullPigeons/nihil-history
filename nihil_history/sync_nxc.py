@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import sqlite3
 from pathlib import Path
 
@@ -189,6 +190,12 @@ def _extract_hosts(db_path: Path, query: str, source: str) -> list[dict]:
                 ip, hostname = row
             else:
                 hostname = row[0]
+            if ip:
+                try:
+                    ipaddress.ip_address(ip.strip())
+                except ValueError:
+                    hostname = hostname or ip
+                    ip = None
             results.append({"ip": ip, "hostname": hostname, "domain": domain, "os": os_name, "source": source})
         conn.close()
     except Exception:
@@ -227,7 +234,7 @@ def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None
                 all_hosts.extend(_extract_hosts(db_path, host_q, source))
 
         for h in all_hosts:
-            if not h["ip"]:
+            if not h["ip"] and not h["hostname"]:
                 continue
             if _host_pair_exists(h["ip"], h["hostname"]):
                 continue
