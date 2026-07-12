@@ -34,18 +34,29 @@ def home_dir() -> Path:
     return DEFAULT_HOME
 
 
+_ensured_home: Path | None = None
+
+
 def ensure_home() -> Path:
+    # Writability doesn't change mid-process, and this is called on nearly
+    # every read/write path (including once per secret field while
+    # decrypting credential lists), so the write-probe syscalls add up fast
+    # on large histories. Resolve and verify once per process.
+    global _ensured_home
+    if _ensured_home is not None:
+        return _ensured_home
     target = home_dir()
     try:
         target.mkdir(parents=True, exist_ok=True)
         probe = target / ".write_probe"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink(missing_ok=True)
-        return target
+        _ensured_home = target
     except OSError:
         fallback = _fallback_home()
         fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
+        _ensured_home = fallback
+    return _ensured_home
 
 
 def default_db_path() -> Path:
