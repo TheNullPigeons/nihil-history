@@ -90,6 +90,7 @@ class Target(Base):
     object: Mapped[str | None] = mapped_column(String(255), nullable=True)
     computer: Mapped[str | None] = mapped_column(String(255), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    principal: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
 
     engagement: Mapped["Engagement"] = relationship(back_populates="targets")

@@ -276,9 +276,10 @@ def cmd_targets_add(
     object_: str | None = typer.Option(None, "--object", "-o", help="TARGET_OBJECT"),
     computer: str | None = typer.Option(None, "--computer", "-c", help="TARGET_COMPUTER"),
     domain: str | None = typer.Option(None, "--domain", "-d", help="TARGET_DOMAIN"),
+    principal: str | None = typer.Option(None, "--principal", "-p", help="TARGET_PRINCIPAL"),
 ) -> None:
     try:
-        target = targets_add(name=name, user=user, group=group, object_=object_, computer=computer, domain=domain)
+        target = targets_add(name=name, user=user, group=group, object_=object_, computer=computer, domain=domain, principal=principal)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
     except ValueError as exc:
@@ -301,8 +302,9 @@ def cmd_targets_list() -> None:
     table.add_column("TARGET_OBJECT")
     table.add_column("TARGET_COMPUTER")
     table.add_column("TARGET_DOMAIN")
+    table.add_column("TARGET_PRINCIPAL")
     for t in entries:
-        table.add_row(str(t.id), t.name, t.user or "-", t.group or "-", t.object or "-", t.computer or "-", t.domain or "-")
+        table.add_row(str(t.id), t.name, t.user or "-", t.group or "-", t.object or "-", t.computer or "-", t.domain or "-", t.principal or "-")
     console.print(table)
 
 
