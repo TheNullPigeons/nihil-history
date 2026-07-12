@@ -6,6 +6,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
+from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static, TabPane, TabbedContent
 
@@ -32,12 +33,14 @@ from nihil_history.services import (
     hosts_remove,
     hosts_set,
     hosts_update,
+    require_engagement,
     targets_add,
     targets_list,
     targets_remove,
     targets_set,
     targets_update,
 )
+from nihil_history.sync_nxc import nxc_delete_credential, nxc_delete_host
 from nihil_history.validators import (
     ALLOWED_PROTOCOLS,
     ALLOWED_STATUS,
@@ -373,6 +376,24 @@ class EngagementScreen(ModalScreen[str | None]):
         )
 
 
+class SearchInput(Input):
+    """Search bar that treats Tab like Enter: confirm and jump to the table.
+
+    Tab is normally reserved for focus navigation, so pressing it here would
+    just move focus one widget at a time (through the tab bar, etc.) instead
+    of landing on the results - the muscle-memory "type query, Tab to the
+    result" flow otherwise took two Tab presses to work.
+    """
+
+    BINDINGS = [Binding("tab", "confirm_search", "Confirm", show=False)]
+
+    def action_confirm_search(self) -> None:
+        app = self.app
+        app._search_query = self.value.lower()
+        app._apply_search()
+        app._close_search(clear=False)
+
+
 class NihilHistoryTUI(App[None]):
     TITLE = "nxh tui"
     SUB_TITLE = "Credentials, hosts, and access matrix"
@@ -419,6 +440,18 @@ class NihilHistoryTUI(App[None]):
       height: 3;
       border: solid $accent;
     }
+    Container {
+      height: 1fr;
+    }
+    TabbedContent {
+      height: 1fr;
+    }
+    TabPane {
+      height: 1fr;
+    }
+    DataTable {
+      height: 1fr;
+    }
     """
 
     def compose(self) -> ComposeResult:
@@ -430,10 +463,11 @@ class NihilHistoryTUI(App[None]):
         self._search_query: str = ""
         self._visual_mode: bool = False
         self._visual_anchor: int = 0
+        self._visual_prev_sel: range | None = None
         yield Header()
         with Container():
             yield Static("Ready", id="status")
-            yield Input(id="search_bar", placeholder="/search...")
+            yield SearchInput(id="search_bar", placeholder="/search...")
             with TabbedContent(initial="creds"):
                 with TabPane("Credentials", id="creds"):
                     yield DataTable(id="creds_table", cursor_type="row")
@@ -513,6 +547,21 @@ class NihilHistoryTUI(App[None]):
         if t := self._active_table():
             t.focus()
 
+    @on(TabbedContent.TabActivated)
+    def _on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        # The search filter is shared global state across all tabs' lists,
+        # so leaving it active after switching tabs silently filters a tab
+        # you never searched in (e.g. "/administrator" on creds, then
+        # switching to hosts shows nothing because it's still filtering by
+        # that query). Any tab change clears it.
+        if not self._search_query:
+            return
+        bar = self.query_one("#search_bar", Input)
+        bar.value = ""
+        bar.display = False
+        self._search_query = ""
+        self._apply_search()
+
     def action_add_item(self) -> None:
         active = self.query_one(TabbedContent).active
         if active == "creds":
@@ -553,6 +602,7 @@ class NihilHistoryTUI(App[None]):
                         ("Object  (TARGET_OBJECT)", "cn=...", ""),
                         ("Computer  (TARGET_COMPUTER)", "DC01", ""),
                         ("Domain  (TARGET_DOMAIN)", "serval.int", ""),
+                        ("Principal  (TARGET_PRINCIPAL)", "S-1-5-21-...", ""),
                     ],
                 ),
                 callback=self._on_add_target,
@@ -582,7 +632,7 @@ class NihilHistoryTUI(App[None]):
             ids = [item.id for item in items]
             self.push_screen(
                 QuickInputScreen(f"Delete {len(ids)} {entity} ({', '.join(str(i) for i in ids)})? Type y", "y"),
-                callback=lambda raw: self._confirm_delete_many(raw, entity, ids),
+                callback=lambda raw: self._confirm_delete_many(raw, entity, ids, items),
             )
             return
         if active == "creds":
@@ -591,7 +641,7 @@ class NihilHistoryTUI(App[None]):
                 return
             self.push_screen(
                 QuickInputScreen(f"Delete credential id={selected.id}? Type y", "y"),
-                callback=lambda raw: self._confirm_delete(raw, "creds", selected.id),
+                callback=lambda raw: self._confirm_delete(raw, "creds", selected.id, selected),
             )
         elif active == "hosts":
             selected = self._selected_host()
@@ -599,7 +649,7 @@ class NihilHistoryTUI(App[None]):
                 return
             self.push_screen(
                 QuickInputScreen(f"Delete host id={selected.id}? Type y", "y"),
-                callback=lambda raw: self._confirm_delete(raw, "hosts", selected.id),
+                callback=lambda raw: self._confirm_delete(raw, "hosts", selected.id, selected),
             )
         elif active == "matrix":
             selected = self._selected_link()
@@ -686,6 +736,7 @@ class NihilHistoryTUI(App[None]):
                         ("Object  (TARGET_OBJECT)", "cn=...", selected.object or ""),
                         ("Computer  (TARGET_COMPUTER)", "DC01", selected.computer or ""),
                         ("Domain  (TARGET_DOMAIN)", "serval.int", selected.domain or ""),
+                        ("Principal  (TARGET_PRINCIPAL)", "S-1-5-21-...", selected.principal or ""),
                     ],
                 ),
                 callback=lambda values: self._on_edit_target(values, selected.id),
@@ -790,7 +841,8 @@ class NihilHistoryTUI(App[None]):
                           operating_system=obj.operating_system, role=obj.role, source="yank")
             elif kind == "targets":
                 targets_add(name=obj.name, user=obj.user, group=obj.group,
-                            object_=obj.object, computer=obj.computer, domain=obj.domain)
+                            object_=obj.object, computer=obj.computer, domain=obj.domain,
+                            principal=obj.principal)
             elif kind == "matrix":
                 access_link(cred_id=obj.cred_id, host_id=obj.host_id,
                             protocol=obj.protocol, status=obj.status, source="yank")
@@ -813,10 +865,12 @@ class NihilHistoryTUI(App[None]):
             return
         self._visual_mode = True
         self._visual_anchor = t.cursor_row
+        self._visual_prev_sel = None
         self._update_visual_status(t)
 
     def _exit_visual_mode(self) -> None:
         self._visual_mode = False
+        self._visual_prev_sel = None
         active = self.query_one(TabbedContent).active
         if active == "creds":
             self._render_creds(self._vis_creds)
@@ -829,15 +883,30 @@ class NihilHistoryTUI(App[None]):
         b = t.cursor_row
         return range(min(a, b), max(a, b) + 1)
 
+    def _paint_visual_markers(self, table: DataTable, count: int, sel: range) -> None:
+        """Update only the marker cells that changed since the last selection.
+
+        Avoids a full clear()+rebuild on every up/down keystroke, which used
+        to reset and re-scroll the cursor each time and caused a visible
+        jump/flicker while moving through the selection in visual mode.
+        """
+        prev = getattr(self, "_visual_prev_sel", None)
+        lo = min(sel.start, prev.start) if prev is not None else sel.start
+        hi = max(sel.stop, prev.stop) if prev is not None else sel.stop
+        for i in range(max(0, lo), min(hi, count)):
+            marker = "▶" if i in sel else " "
+            table.update_cell_at(Coordinate(i, 0), marker)
+        self._visual_prev_sel = sel
+
     def _update_visual_status(self, t) -> None:
         sel = self._visual_selection(t)
         n = len(sel)
         self._set_status(f"-- VISUAL -- {n} row{'s' if n > 1 else ''} (#{sel.start + 1}-#{sel.stop})  |  d delete  |  Esc cancel")
         active = self.query_one(TabbedContent).active
         if active == "creds":
-            self._render_creds(self._vis_creds, sel)
+            self._paint_visual_markers(t, len(self._vis_creds), sel)
         elif active == "hosts":
-            self._render_hosts(self._vis_hosts, sel)
+            self._paint_visual_markers(t, len(self._vis_hosts), sel)
 
     def action_show_allowed_values(self) -> None:
         protocols = ", ".join(sorted(ALLOWED_PROTOCOLS))
@@ -882,12 +951,20 @@ class NihilHistoryTUI(App[None]):
         bar.display = True
         bar.focus()
 
-    def _close_search(self) -> None:
+    def _close_search(self, clear: bool = True) -> None:
+        """Hide the search bar.
+
+        `clear=True` (Escape) cancels the search and restores the full list.
+        `clear=False` (Enter/Tab) keeps the filter active and just hides the
+        input, so confirming a search actually lands you on the filtered
+        results instead of immediately showing everything again.
+        """
         bar = self.query_one("#search_bar", Input)
         bar.display = False
-        bar.value = ""
-        self._search_query = ""
-        self._apply_search()
+        if clear:
+            bar.value = ""
+            self._search_query = ""
+            self._apply_search()
         if t := self._active_table():
             t.focus()
 
@@ -915,7 +992,8 @@ class NihilHistoryTUI(App[None]):
                     q in (t.group or "").lower() or
                     q in (t.object or "").lower() or
                     q in (t.computer or "").lower() or
-                    q in (t.domain or "").lower()]
+                    q in (t.domain or "").lower() or
+                    q in (t.principal or "").lower()]
         else:
             creds = self.state.creds
             hosts = self.state.hosts
@@ -935,7 +1013,7 @@ class NihilHistoryTUI(App[None]):
     def _on_search_submitted(self, event: Input.Submitted) -> None:
         self._search_query = event.value.lower()
         self._apply_search()
-        self._close_search()
+        self._close_search(clear=False)
 
     def on_key(self, event) -> None:
         bar = self.query_one("#search_bar", Input)
@@ -1082,11 +1160,11 @@ class NihilHistoryTUI(App[None]):
         if values is None:
             return
         try:
-            name, user, group, object_, computer, domain = values
+            name, user, group, object_, computer, domain, principal = values
             if not name:
                 self._set_status("Target name is required.")
                 return
-            target = targets_add(name=name, user=user or None, group=group or None, object_=object_ or None, computer=computer or None, domain=domain or None)
+            target = targets_add(name=name, user=user or None, group=group or None, object_=object_ or None, computer=computer or None, domain=domain or None, principal=principal or None)
             self.notify(f"'{target.name}' added (id={target.id})", title="Target added", severity="information")
             self._refresh_all()
         except MissingEngagementError:
@@ -1098,7 +1176,7 @@ class NihilHistoryTUI(App[None]):
         if values is None:
             return
         try:
-            name, user, group, object_, computer, domain = values
+            name, user, group, object_, computer, domain, principal = values
             if not name:
                 self._set_status("Target name is required.")
                 return
@@ -1110,19 +1188,42 @@ class NihilHistoryTUI(App[None]):
                 object_=object_ or None,
                 computer=computer or None,
                 domain=domain or None,
+                principal=principal or None,
             )
             self.notify(f"Target id={target_id} updated", title="Edited", severity="information")
             self._refresh_all()
         except Exception as exc:
             self.notify(str(exc), title="Edit target failed", severity="error", markup=False)
 
-    def _confirm_delete_many(self, raw: str | None, entity: str, ids: list[int]) -> None:
+    def _nxc_workspace_name(self) -> str | None:
+        try:
+            entry = require_engagement()
+            return entry.nxc_workspace or entry.name
+        except Exception:
+            return None
+
+    def _purge_from_nxc(self, entity: str, obj) -> int:
+        """Best-effort: also drop the matching row from NXC's own workspace db, if present."""
+        workspace = self._nxc_workspace_name()
+        if workspace is None:
+            return 0
+        try:
+            if entity == "creds":
+                return nxc_delete_credential(workspace, obj.username, obj.domain, obj.password, obj.hash)
+            if entity == "hosts":
+                return nxc_delete_host(workspace, obj.ip, obj.hostname)
+        except Exception:
+            return 0
+        return 0
+
+    def _confirm_delete_many(self, raw: str | None, entity: str, ids: list[int], objs: list | None = None) -> None:
         self._exit_visual_mode()
         if (raw or "").upper() not in ("Y", "YES"):
             self._set_status("Delete cancelled.")
             return
         errors = []
-        for eid in ids:
+        nxc_purged = 0
+        for i, eid in enumerate(ids):
             try:
                 if entity == "creds":
                     creds_remove(eid)
@@ -1130,15 +1231,18 @@ class NihilHistoryTUI(App[None]):
                     hosts_remove(eid)
                 else:
                     hosts_remove(eid)
+                if objs is not None and entity in ("creds", "hosts"):
+                    nxc_purged += self._purge_from_nxc(entity, objs[i])
             except Exception as exc:
                 errors.append(str(exc))
         if errors:
             self.notify("; ".join(errors), title="Delete errors", severity="error", markup=False)
         else:
-            self.notify(f"{len(ids)} {entity} deleted", title="Deleted", severity="warning")
+            suffix = f" ({nxc_purged} also removed from NXC db)" if nxc_purged else ""
+            self.notify(f"{len(ids)} {entity} deleted{suffix}", title="Deleted", severity="warning")
         self._refresh_all()
 
-    def _confirm_delete(self, raw: str | None, entity: str, entity_id: int) -> None:
+    def _confirm_delete(self, raw: str | None, entity: str, entity_id: int, obj=None) -> None:
         if (raw or "").upper() not in ("Y", "YES"):
             return
         try:
@@ -1150,7 +1254,9 @@ class NihilHistoryTUI(App[None]):
                 targets_remove(entity_id)
             else:
                 access_remove(entity_id)
-            self.notify(f"{entity.rstrip('s')} id={entity_id} deleted", title="Deleted", severity="warning")
+            nxc_purged = self._purge_from_nxc(entity, obj) if obj is not None and entity in ("creds", "hosts") else 0
+            suffix = " (also removed from NXC db)" if nxc_purged else ""
+            self.notify(f"{entity.rstrip('s')} id={entity_id} deleted{suffix}", title="Deleted", severity="warning")
             self._refresh_all()
         except Exception as exc:
             self.notify(str(exc), title="Delete failed", severity="error", markup=False)
@@ -1296,6 +1402,7 @@ class NihilHistoryTUI(App[None]):
         table.add_column("TARGET_OBJECT")
         table.add_column("TARGET_COMPUTER")
         table.add_column("TARGET_DOMAIN")
+        table.add_column("TARGET_PRINCIPAL")
         for target in targets:
             table.add_row(
                 str(target.id),
@@ -1305,6 +1412,7 @@ class NihilHistoryTUI(App[None]):
                 target.object or "-",
                 target.computer or "-",
                 target.domain or "-",
+                target.principal or "-",
             )
 
     def _selected_target(self):
