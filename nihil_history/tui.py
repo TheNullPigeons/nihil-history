@@ -607,9 +607,8 @@ class NihilHistoryTUI(App[None]):
                 ),
                 callback=self._on_add_target,
             )
-        else:
-            self._set_status("Use 'L' to add an access link from matrix tab.")
-            return
+        elif active == "matrix":
+            self.action_link_item()
 
     def action_delete_item(self) -> None:
         active = self.query_one(TabbedContent).active
