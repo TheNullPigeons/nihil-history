@@ -14,7 +14,13 @@ class AppConfig:
     current_engagement: str | None = None
     selected_cred_id: int | None = None
     selected_host_id: int | None = None
+    selected_role_hosts: dict = None  # role (uppercase) -> host_id
+    selected_target_id: int | None = None
     encryption_enabled: bool = False
+
+    def __post_init__(self):
+        if self.selected_role_hosts is None:
+            object.__setattr__(self, "selected_role_hosts", {})
 
 
 def _fallback_home() -> Path:
@@ -28,18 +34,29 @@ def home_dir() -> Path:
     return DEFAULT_HOME
 
 
+_ensured_home: Path | None = None
+
+
 def ensure_home() -> Path:
+    # Writability doesn't change mid-process, and this is called on nearly
+    # every read/write path (including once per secret field while
+    # decrypting credential lists), so the write-probe syscalls add up fast
+    # on large histories. Resolve and verify once per process.
+    global _ensured_home
+    if _ensured_home is not None:
+        return _ensured_home
     target = home_dir()
     try:
         target.mkdir(parents=True, exist_ok=True)
         probe = target / ".write_probe"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink(missing_ok=True)
-        return target
+        _ensured_home = target
     except OSError:
         fallback = _fallback_home()
         fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
+        _ensured_home = fallback
+    return _ensured_home
 
 
 def default_db_path() -> Path:
@@ -48,6 +65,10 @@ def default_db_path() -> Path:
 
 def config_path() -> Path:
     return ensure_home() / "config.json"
+
+
+def env_file_path() -> Path:
+    return ensure_home() / "env.sh"
 
 
 def key_path() -> Path:
@@ -81,12 +102,16 @@ def load_config() -> AppConfig:
     current_engagement = raw.get("current_engagement")
     selected_cred_id = raw.get("selected_cred_id")
     selected_host_id = raw.get("selected_host_id")
+    selected_role_hosts = raw.get("selected_role_hosts") or {}
+    selected_target_id = raw.get("selected_target_id")
     encryption_enabled = bool(raw.get("encryption_enabled", os.environ.get("NIHIL_HISTORY_ENCRYPTION", "0") == "1"))
     return AppConfig(
         db_path=db_path,
         current_engagement=current_engagement,
         selected_cred_id=selected_cred_id,
         selected_host_id=selected_host_id,
+        selected_role_hosts=selected_role_hosts,
+        selected_target_id=selected_target_id,
         encryption_enabled=encryption_enabled,
     )
 
@@ -98,6 +123,8 @@ def save_config(config: AppConfig) -> None:
         "current_engagement": config.current_engagement,
         "selected_cred_id": config.selected_cred_id,
         "selected_host_id": config.selected_host_id,
+        "selected_role_hosts": config.selected_role_hosts,
+        "selected_target_id": config.selected_target_id,
         "encryption_enabled": config.encryption_enabled,
     }
     try:

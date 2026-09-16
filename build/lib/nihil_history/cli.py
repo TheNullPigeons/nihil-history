@@ -10,6 +10,7 @@ from rich.table import Table
 from nihil_history.db import init_db
 from nihil_history.services import (
     MissingEngagementError,
+    ensure_default_engagement,
     access_link,
     access_list,
     access_matrix,
@@ -20,23 +21,34 @@ from nihil_history.services import (
     creds_list,
     engagement_init,
     engagement_list,
+    engagement_set_workspace,
     engagement_use,
     env_exports,
+    install_shell_integration,
+    uninstall_shell_integration,
+    write_env_file,
     export_report_json,
     export_report_markdown,
     hosts_add,
     hosts_remove,
     hosts_set,
     hosts_list,
+    require_engagement,
+    targets_add,
+    targets_list,
+    targets_remove,
+    targets_set,
+    targets_update,
 )
 from nihil_history.sync_nmap import import_nmap_xml
-from nihil_history.sync_nxc import import_nxc_text
+from nihil_history.sync_nxc import import_nxc_db
 from nihil_history.tui import NihilHistoryTUI
 
 app = typer.Typer(no_args_is_help=True, help="nihil-history CLI")
 engagement_app = typer.Typer(no_args_is_help=True, help="Manage engagements.")
 creds_app = typer.Typer(no_args_is_help=True, help="Manage credentials.")
 hosts_app = typer.Typer(no_args_is_help=True, help="Manage hosts.")
+targets_app = typer.Typer(no_args_is_help=True, help="Manage AD targets.")
 access_app = typer.Typer(no_args_is_help=True, help="Manage access links.")
 env_app = typer.Typer(no_args_is_help=True, help="Print environment exports.")
 sync_app = typer.Typer(no_args_is_help=True, help="Synchronize from external tools.")
@@ -50,16 +62,23 @@ def _handle_missing_engagement(exc: MissingEngagementError) -> None:
 
 
 @app.callback()
-def main() -> None:
+def main(ctx: typer.Context) -> None:
     binary_name = Path(sys.argv[0]).name
     if binary_name == "nxh":
         console.print("[yellow]Deprecated alias:[/yellow] use `nhi` instead of `nxh`.")
-    init_db()
+    ensure_default_engagement()
+    if ctx.invoked_subcommand != "sync":
+        try:
+            entry = require_engagement()
+            import_nxc_db(workspace_name=entry.nxc_workspace or entry.name)
+        except Exception:
+            pass
 
 
 app.add_typer(engagement_app, name="engagement")
 app.add_typer(creds_app, name="creds")
 app.add_typer(hosts_app, name="hosts")
+app.add_typer(targets_app, name="targets")
 app.add_typer(access_app, name="access")
 app.add_typer(env_app, name="env")
 app.add_typer(sync_app, name="sync")
@@ -67,9 +86,12 @@ app.add_typer(export_app, name="export")
 
 
 @engagement_app.command("init")
-def cmd_engagement_init(name: str) -> None:
-    entry = engagement_init(name)
-    console.print(f"[green]Engagement ready:[/green] {entry.name}")
+def cmd_engagement_init(
+    name: str,
+    nxc_workspace: str = typer.Option(None, "--workspace", "-w", help="NXC workspace name (default: engagement name)"),
+) -> None:
+    entry = engagement_init(name, nxc_workspace=nxc_workspace)
+    console.print(f"[green]Engagement ready:[/green] {entry.name} [dim](nxc-ws: {entry.nxc_workspace})[/dim]")
 
 
 @engagement_app.command("use")
@@ -78,7 +100,24 @@ def cmd_engagement_use(name: str) -> None:
         entry = engagement_use(name)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
-    console.print(f"[green]Active engagement:[/green] {entry.name}")
+    console.print(f"[green]Active engagement:[/green] {entry.name} [dim](nxc-ws: {entry.nxc_workspace or entry.name})[/dim]")
+
+
+@engagement_app.command("set-workspace")
+def cmd_engagement_set_workspace(
+    workspace: str,
+    name: str = typer.Option(None, "--engagement", "-e", help="Engagement name (default: current)"),
+) -> None:
+    if name is None:
+        try:
+            name = require_engagement().name
+        except MissingEngagementError as exc:
+            _handle_missing_engagement(exc)
+    try:
+        entry = engagement_set_workspace(name, workspace)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    console.print(f"[green]Engagement[/green] {entry.name} [green]now linked to NXC workspace[/green] {entry.nxc_workspace}")
 
 
 @engagement_app.command("list")
@@ -87,27 +126,35 @@ def cmd_engagement_list() -> None:
     table = Table(title="Engagements")
     table.add_column("ID")
     table.add_column("Name")
+    table.add_column("NXC workspace")
     table.add_column("Created")
     for entry in entries:
-        table.add_row(str(entry.id), entry.name, entry.created_at.isoformat())
+        table.add_row(str(entry.id), entry.name, entry.nxc_workspace or "-", entry.created_at.isoformat())
     console.print(table)
 
 
 @creds_app.command("add")
 def cmd_creds_add(
-    username: str = typer.Option(..., "--username", "-u"),
-    secret: str | None = typer.Option(None, "--secret", "-p", help="Password/hash/token."),
+    username: str | None = typer.Option(None, "--username", "-u"),
+    password: str | None = typer.Option(None, "--password", "-p"),
+    hash: str | None = typer.Option(None, "--hash"),
+    secret: str | None = typer.Option(None, "--secret", "-s"),
     domain: str | None = typer.Option(None, "--domain", "-d"),
-    cred_type: str = typer.Option("password", "--type"),
 ) -> None:
     try:
-        cred = creds_add(username=username, secret=secret, domain=domain, cred_type=cred_type)
+        cred = creds_add(
+            username=username,
+            password=password,
+            hash=hash,
+            secret=secret,
+            domain=domain,
+        )
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
-    console.print(f"[green]Credential added:[/green] id={cred.id} user={cred.username}")
+    console.print(f"[green]Credential added:[/green] id={cred.id} user={cred.username or '-'}")
 
 
 @creds_app.command("list")
@@ -120,10 +167,20 @@ def cmd_creds_list() -> None:
     table.add_column("ID")
     table.add_column("Username")
     table.add_column("Domain")
-    table.add_column("Type")
+    table.add_column("Password")
+    table.add_column("Hash")
+    table.add_column("Secret")
     table.add_column("Source")
     for cred in entries:
-        table.add_row(str(cred.id), cred.username, cred.domain or "-", cred.cred_type, cred.source)
+        table.add_row(
+            str(cred.id),
+            cred.username or "-",
+            cred.domain or "-",
+            "***" if cred.password else "-",
+            "***" if cred.hash else "-",
+            "***" if cred.secret else "-",
+            cred.source,
+        )
     console.print(table)
 
 
@@ -153,13 +210,14 @@ def cmd_creds_rm(cred_id: int = typer.Option(..., "--id")) -> None:
 
 @hosts_app.command("add")
 def cmd_hosts_add(
-    ip: str = typer.Option(..., "--ip"),
+    ip: str | None = typer.Option(None, "--ip"),
     hostname: str | None = typer.Option(None, "--hostname"),
     domain: str | None = typer.Option(None, "--domain"),
     os_name: str | None = typer.Option(None, "--os"),
+    role: str | None = typer.Option(None, "--role"),
 ) -> None:
     try:
-        host = hosts_add(ip=ip, hostname=hostname, domain=domain, operating_system=os_name)
+        host = hosts_add(ip=ip, hostname=hostname, domain=domain, operating_system=os_name, role=role)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
     except ValueError as exc:
@@ -180,8 +238,9 @@ def cmd_hosts_list() -> None:
     table.add_column("Hostname")
     table.add_column("Domain")
     table.add_column("OS")
+    table.add_column("Role")
     for host in entries:
-        table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-")
+        table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-", host.role or "-")
     console.print(table)
 
 
@@ -207,6 +266,70 @@ def cmd_hosts_rm(host_id: int = typer.Option(..., "--id")) -> None:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
     console.print(f"[green]Host removed:[/green] id={host_id}")
+
+
+@targets_app.command("add")
+def cmd_targets_add(
+    name: str = typer.Option(..., "--name", "-n"),
+    user: str | None = typer.Option(None, "--user", "-u", help="TARGET_USER"),
+    group: str | None = typer.Option(None, "--group", "-g", help="TARGET_GROUP"),
+    object_: str | None = typer.Option(None, "--object", "-o", help="TARGET_OBJECT"),
+    computer: str | None = typer.Option(None, "--computer", "-c", help="TARGET_COMPUTER"),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="TARGET_DOMAIN"),
+    principal: str | None = typer.Option(None, "--principal", "-p", help="TARGET_PRINCIPAL"),
+) -> None:
+    try:
+        target = targets_add(name=name, user=user, group=group, object_=object_, computer=computer, domain=domain, principal=principal)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Target added:[/green] id={target.id} name={target.name}")
+
+
+@targets_app.command("list")
+def cmd_targets_list() -> None:
+    try:
+        entries = targets_list()
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    table = Table(title="Targets")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("TARGET_USER")
+    table.add_column("TARGET_GROUP")
+    table.add_column("TARGET_OBJECT")
+    table.add_column("TARGET_COMPUTER")
+    table.add_column("TARGET_DOMAIN")
+    table.add_column("TARGET_PRINCIPAL")
+    for t in entries:
+        table.add_row(str(t.id), t.name, t.user or "-", t.group or "-", t.object or "-", t.computer or "-", t.domain or "-", t.principal or "-")
+    console.print(table)
+
+
+@targets_app.command("set")
+def cmd_targets_set(target_id: int = typer.Option(..., "--id")) -> None:
+    try:
+        target = targets_set(target_id)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Selected target:[/green] id={target.id} name={target.name}")
+
+
+@targets_app.command("rm")
+def cmd_targets_rm(target_id: int = typer.Option(..., "--id")) -> None:
+    try:
+        targets_remove(target_id)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Target removed:[/green] id={target_id}")
 
 
 @hosts_app.command("import-nmap")
@@ -303,22 +426,88 @@ def cmd_env_print(shell: str = typer.Option("bash", "--shell")) -> None:
             console.print(f'export {key}="{escaped}"')
 
 
-@sync_app.command("nxc")
-def cmd_sync_nxc(file: str = typer.Option(..., "--file", "-f")) -> None:
+@env_app.command("export")
+def cmd_env_export(
+    shell: str = typer.Option("zsh", "--shell"),
+) -> None:
+    """Write env exports to ~/.nihil-history/env.sh."""
     try:
-        result = import_nxc_text(file)
-    except FileNotFoundError:
-        console.print(f"[red]File not found:[/red] {file}")
+        path = write_env_file(shell=shell)
+    except MissingEngagementError as exc:
+        _handle_missing_engagement(exc)
+        return
+    console.print(f"[green]Written:[/green] {path}")
+    console.print(f"[dim]Add to ~/.zshrc:[/dim]  source {path}")
+
+
+@env_app.command("install-shell")
+def cmd_env_install_shell(
+    shell: str = typer.Option(None, "--shell", help="Target shell (zsh|bash). Defaults to $SHELL."),
+) -> None:
+    """Patch ~/.zshrc or ~/.bashrc with auto-source + nhi/nhit/nihil-history wrappers."""
+    try:
+        rc_path = install_shell_integration(shell)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Shell integration installed in[/green] {rc_path}")
+    console.print("[dim]Open a new shell or run:[/dim]  exec $SHELL -l")
+
+
+@env_app.command("uninstall-shell")
+def cmd_env_uninstall_shell(
+    shell: str = typer.Option(None, "--shell", help="Target shell (zsh|bash). Defaults to $SHELL."),
+) -> None:
+    """Remove the nihil-history shell integration block."""
+    try:
+        rc_path = uninstall_shell_integration(shell)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    if rc_path is None:
+        console.print("[yellow]No nihil-history block found.[/yellow]")
+        return
+    console.print(f"[green]Shell integration removed from[/green] {rc_path}")
+
+
+@sync_app.command("nxc")
+def cmd_sync_nxc(
+    workspace_path: str = typer.Option(None, "--workspace-path", help="Path to ~/.nxc/workspaces (default: ~/.nxc/workspaces)"),
+    workspace_name: str = typer.Option(None, "--workspace", "-w", help="Single NXC workspace to import (default: engagement-linked)"),
+    all_workspaces: bool = typer.Option(False, "--all", help="Import from all NXC workspaces (overrides engagement link)"),
+) -> None:
+    if workspace_name is None and not all_workspaces:
+        try:
+            entry = require_engagement()
+            workspace_name = entry.nxc_workspace or entry.name
+        except MissingEngagementError as exc:
+            _handle_missing_engagement(exc)
+    try:
+        result = import_nxc_db(workspace_path, workspace_name=workspace_name)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
+    scope = "all workspaces" if all_workspaces else f"workspace '{workspace_name}'"
     console.print(
-        f"[green]NXC sync complete:[/green] creds={result['creds']} hosts={result['hosts']} links={result['links']}"
+        f"[green]NXC sync complete[/green] [dim]({scope})[/dim]: creds={result['creds']} hosts={result['hosts']} links={result['links']}"
     )
 
 
 @app.command("tui")
 def cmd_tui() -> None:
+    NihilHistoryTUI().run()
+
+
+def tui_main() -> None:
+    init_db()
+    ensure_default_engagement()
+    try:
+        entry = require_engagement()
+        import_nxc_db(workspace_name=entry.nxc_workspace or entry.name)
+    except Exception:
+        pass
     NihilHistoryTUI().run()
 
 

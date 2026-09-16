@@ -5,7 +5,6 @@ import re
 
 ALLOWED_PROTOCOLS = {"smb", "winrm", "rdp", "ssh", "ldap", "http", "https", "mssql", "wmi", "ftp"}
 ALLOWED_STATUS = {"valid", "invalid", "unknown"}
-ALLOWED_CRED_TYPES = {"password", "ntlm", "kerberos", "ssh_key", "token", "certificate"}
 DOMAIN_RE = re.compile(r"^(?=.{1,255}$)([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$")
 
 
@@ -49,12 +48,4 @@ def validate_status(value: str) -> str:
     if clean not in ALLOWED_STATUS:
         allowed = ", ".join(sorted(ALLOWED_STATUS))
         raise ValueError(f"Invalid status '{clean}'. Allowed: {allowed}")
-    return clean
-
-
-def validate_cred_type(value: str) -> str:
-    clean = require_non_empty(value, "type").lower()
-    if clean not in ALLOWED_CRED_TYPES:
-        allowed = ", ".join(sorted(ALLOWED_CRED_TYPES))
-        raise ValueError(f"Invalid credential type '{clean}'. Allowed: {allowed}")
     return clean
