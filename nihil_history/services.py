@@ -187,9 +187,42 @@ def _engagement_id() -> int:
     return require_engagement().id
 
 
+def _normalize_pasted_utf16le_secret(secret: str) -> str:
+    """Recover a printable secret pasted as UTF-16LE plus terminal backspaces.
+
+    Some terminal/clipboard paths can feed a Textual input a byte-oriented
+    UTF-16LE sequence. Persisting that sequence makes exported environment
+    variables stop at the first NUL byte. Only normalize the unmistakable
+    pattern: at least four UTF-16LE ASCII characters, optionally followed by
+    backspace bytes emitted while the terminal processes the paste.
+    """
+    if "\x00" not in secret:
+        return secret
+    try:
+        raw = secret.encode("latin-1")
+    except UnicodeEncodeError:
+        return secret
+
+    pairs = 0
+    while 2 * pairs + 1 < len(raw) and raw[2 * pairs + 1] == 0:
+        pairs += 1
+    if pairs < 4:
+        return secret
+
+    trailing = raw[2 * pairs :]
+    if trailing and any(byte != 0x08 for byte in trailing):
+        return secret
+    try:
+        decoded = raw[: 2 * pairs].decode("utf-16le")
+    except UnicodeDecodeError:
+        return secret
+    return decoded if decoded.isprintable() else secret
+
+
 def _normalized_secret_for_storage(secret: str | None) -> str | None:
     if secret is None:
         return None
+    secret = _normalize_pasted_utf16le_secret(secret)
     cfg = load_config()
     if not cfg.encryption_enabled:
         return secret
@@ -201,10 +234,10 @@ def _decrypted_secret(secret: str | None) -> str | None:
     if secret is None:
         return None
     cfg = load_config()
-    if not cfg.encryption_enabled:
-        return secret
-    key = load_or_create_key(key_path())
-    return decrypt_secret(secret, key)
+    if cfg.encryption_enabled:
+        key = load_or_create_key(key_path())
+        secret = decrypt_secret(secret, key)
+    return _normalize_pasted_utf16le_secret(secret)
 
 
 def _materialize_credential_secrets(entry: Credential) -> Credential:
