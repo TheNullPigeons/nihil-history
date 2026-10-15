@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static, TabPane, TabbedContent
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Markdown, Static, TabPane, TabbedContent
 
 from nihil_history.config import load_config
 from nihil_history.services import (
@@ -394,6 +394,77 @@ class SearchInput(Input):
         app._close_search(clear=False)
 
 
+class HelpScreen(ModalScreen[None]):
+    BINDINGS = [
+        Binding("escape,?,q", "close", "Close help"),
+    ]
+    CSS = """
+    HelpScreen { align: center middle; }
+    HelpScreen #help-dialog {
+      width: 90%;
+      max-width: 100;
+      height: 90%;
+      max-height: 40;
+      border: round $accent;
+      background: $surface;
+      padding: 1;
+    }
+    HelpScreen #help-scroll { height: 1fr; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Container(id="help-dialog"):
+            yield Label("Keyboard shortcuts")
+            with VerticalScroll(id="help-scroll"):
+                yield Markdown("""
+| Shortcut | Action |
+| --- | --- |
+| Left / Right, h / l | Previous / next tab from a table. |
+| 1 / 2 / 3 / 4 | Credentials / Hosts / Targets / Access Matrix. |
+| Up / Down, j / k | Move between rows. |
+| g / G | First / last row. |
+| Tab / Shift+Tab | Move focus between controls. |
+| / | Open search and filter the current data. |
+| Enter or Tab in search | Keep the filter and return to the table. |
+| Escape in search | Clear the filter and return to the table. |
+| a | Add an item in the current tab. |
+| e | Edit the selected item. |
+| d | Delete the selected item, after confirmation. |
+| s | Set the selected credential, host, or target as active. |
+| Enter | Set the selected credential, host, or target and quit; show link details in Access Matrix. |
+| L (Shift+L) | Create a credential-to-host access link. |
+| Ctrl+D | Toggle the selected host's DC role (Hosts tab). |
+| v | Start / stop visual row selection (Credentials and Hosts). |
+| j / k or Up / Down in visual mode | Extend the selection; d deletes selected rows after confirmation. |
+| Escape in visual mode | Cancel the selection. |
+| y / p | Copy a row internally / paste it as a new entry. |
+| Ctrl+E | Open the engagement manager. |
+| r | Refresh data. |
+| ? | Open this help. |
+| q / Ctrl+q | Quit the main interface. |
+
+Scroll with Up / Down or PageUp / PageDown. Escape, ?, or q closes this help.
+""")
+            yield Button("Close (Esc)", id="help-close")
+
+    def on_mount(self) -> None:
+        self.query_one("#help-scroll", VerticalScroll).focus()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#help-close")
+    def close_button(self) -> None:
+        self.action_close()
+
+
+class HistoryTable(DataTable):
+    BINDINGS = [
+        Binding("left", "app.tab_prev", "Previous tab", show=False),
+        Binding("right", "app.tab_next", "Next tab", show=False),
+    ]
+
+
 class NihilHistoryTUI(App[None]):
     TITLE = "nxh tui"
     SUB_TITLE = "Credentials, hosts, and access matrix"
@@ -414,7 +485,7 @@ class NihilHistoryTUI(App[None]):
         Binding("v", "visual_toggle", "Visual", show=False),
         Binding("y", "yank", "Yank", show=False),
         Binding("p", "paste", "Paste", show=False),
-        Binding("?", "show_allowed_values", "?"),
+        Binding("?", "show_help", "Help"),
         Binding("enter", "show_details", "Set+Quit"),
         Binding("j", "vi_down", "↓", show=False),
         Binding("k", "vi_up", "↑", show=False),
@@ -473,16 +544,25 @@ class NihilHistoryTUI(App[None]):
             yield SearchInput(id="search_bar", placeholder="/search...")
             with TabbedContent(initial="creds"):
                 with TabPane("Credentials", id="creds"):
-                    yield DataTable(id="creds_table", cursor_type="row")
+                    yield HistoryTable(id="creds_table", cursor_type="row")
                 with TabPane("Hosts", id="hosts"):
-                    yield DataTable(id="hosts_table", cursor_type="row")
+                    yield HistoryTable(id="hosts_table", cursor_type="row")
                 with TabPane("Targets", id="targets"):
-                    yield DataTable(id="targets_table", cursor_type="row")
+                    yield HistoryTable(id="targets_table", cursor_type="row")
                 with TabPane("Access Matrix", id="matrix"):
-                    yield DataTable(id="matrix_table", cursor_type="row")
+                    yield HistoryTable(id="matrix_table", cursor_type="row")
         yield Footer()
 
     def on_mount(self) -> None:
+        # Textual hardcodes 300 ms; adjust only this tab underline.
+        underline = self.query_one("TabbedContent Underline")
+        animate = underline.animate
+
+        def animate_tab(attribute, value, **kwargs):
+            kwargs["duration"] = 0.2
+            animate(attribute, value, **kwargs)
+
+        underline.animate = animate_tab
         try:
             ensure_default_engagement()
         except Exception:
@@ -496,6 +576,9 @@ class NihilHistoryTUI(App[None]):
 
     def action_refresh(self) -> None:
         self._refresh_all()
+
+    def action_help_quit(self) -> None:
+        self.notify("Press [b]q[/b] or [b]Ctrl+q[/b] to quit the app", title="Do you want to quit?")
 
     def action_engagement(self) -> None:
         self._show_engagement_picker()
@@ -548,7 +631,8 @@ class NihilHistoryTUI(App[None]):
 
     def _focus_active_table(self) -> None:
         if t := self._active_table():
-            t.focus()
+            # Avoid Widget.focus() repainting the table before the focus change.
+            t.screen.set_focus(t, scroll_visible=False)
 
     @on(TabbedContent.TabActivated)
     def _on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
@@ -560,7 +644,8 @@ class NihilHistoryTUI(App[None]):
         if not self._search_query:
             return
         bar = self.query_one("#search_bar", Input)
-        bar.value = ""
+        with bar.prevent(Input.Changed):
+            bar.value = ""
         bar.display = False
         self._search_query = ""
         self._apply_search()
@@ -910,10 +995,8 @@ class NihilHistoryTUI(App[None]):
         elif active == "hosts":
             self._paint_visual_markers(t, len(self._vis_hosts), sel)
 
-    def action_show_allowed_values(self) -> None:
-        protocols = ", ".join(sorted(ALLOWED_PROTOCOLS))
-        status = ", ".join(sorted(ALLOWED_STATUS))
-        self._set_status(f"protocol: {protocols} | status: {status}")
+    def action_show_help(self) -> None:
+        self.push_screen(HelpScreen())
 
     def _active_table(self) -> DataTable | None:
         active = self.query_one(TabbedContent).active
@@ -1302,7 +1385,7 @@ class NihilHistoryTUI(App[None]):
             self._set_status(
                 "Loaded: "
                 f"creds={len(creds)} hosts={len(hosts)} links={len(links)} targets={len(tgts)} | "
-                "Keys: h/l tabs, 1/2/3/4 switch, a add, e edit, d delete, s set, L link, / search, ? allowed values, Enter details, r refresh, q quit"
+                "Keys: h/l tabs, 1/2/3/4 switch, a add, e edit, d delete, s set, L link, / search, ? help, Enter details, r refresh, q quit"
             )
 
     def _render_empty(self) -> None:
