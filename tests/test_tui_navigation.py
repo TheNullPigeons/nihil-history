@@ -80,7 +80,7 @@ class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(call.kwargs["duration"], 0.2)
 
     async def test_help_is_scrollable_and_escape_restores_table_focus(self):
-        for size in ((80, 24), (60, 16)):
+        for size in ((80, 24), (60, 16), (80, 10), (40, 8)):
             with self.subTest(size=size):
                 app = NihilHistoryTUI()
                 async with app.run_test(size=size) as pilot:
@@ -89,6 +89,7 @@ class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIsInstance(app.screen, HelpScreen)
                     app.screen.query_one(Markdown)
                     scroll = app.screen.query_one("#help-scroll", VerticalScroll)
+                    self.assertGreaterEqual(scroll.content_size.height, 3)
                     self.assertGreater(scroll.max_scroll_y, 0)
                     await pilot.press("j")
                     await pilot.wait_for_scheduled_animations()
@@ -99,6 +100,12 @@ class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.press("pagedown")
                     await pilot.wait_for_scheduled_animations()
                     self.assertGreater(scroll.scroll_y, 0)
+                    await pilot.press("G")
+                    await pilot.wait_for_scheduled_animations()
+                    self.assertEqual(scroll.scroll_y, scroll.max_scroll_y)
+                    await pilot.press("g")
+                    await pilot.wait_for_scheduled_animations()
+                    self.assertEqual(scroll.scroll_y, 0)
                     await pilot.press("escape")
                     self.assertNotIsInstance(app.screen, HelpScreen)
                     self.assertIs(app.focused, table)

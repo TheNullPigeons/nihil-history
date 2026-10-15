@@ -398,6 +398,8 @@ class HelpScroll(VerticalScroll):
     BINDINGS = [
         Binding("j", "scroll_down", show=False),
         Binding("k", "scroll_up", show=False),
+        Binding("g", "scroll_home", show=False),
+        Binding("G", "scroll_end", show=False),
     ]
 
 
@@ -414,14 +416,15 @@ class HelpScreen(ModalScreen[None]):
       max-height: 40;
       border: round $accent;
       background: $surface;
-      padding: 1;
+      padding: 0 1;
     }
     HelpScreen #help-scroll { height: 1fr; }
+    HelpScreen #help-close { height: 1; min-height: 1; border: none; }
     """
 
     def compose(self) -> ComposeResult:
-        with Container(id="help-dialog"):
-            yield Label("Keyboard shortcuts")
+        with Container(id="help-dialog") as dialog:
+            dialog.border_title = "Keyboard shortcuts"
             with HelpScroll(id="help-scroll"):
                 yield Markdown("""
 ## Main interface
@@ -485,6 +488,7 @@ class HelpScreen(ModalScreen[None]):
 | --- | --- |
 | ↑ / ↓, j / k | Scroll the help. |
 | PageUp / PageDown | Scroll by page. |
+| g / G | Go to the beginning / end of the help. |
 | Escape / ? / q | Close the help. |
 """)
             yield Button("Close (Esc)", id="help-close")
