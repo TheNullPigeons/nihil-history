@@ -429,6 +429,9 @@ class NihilHistoryTUI(App[None]):
     Screen {
       layout: vertical;
     }
+    Screen:inline {
+      height: 50vh;
+    }
     #status {
       height: 1;
       content-align: left middle;

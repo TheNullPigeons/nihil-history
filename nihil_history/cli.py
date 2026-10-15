@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import sys
 
@@ -496,11 +497,14 @@ def cmd_sync_nxc(
 
 
 @app.command("tui")
-def cmd_tui() -> None:
-    NihilHistoryTUI().run()
+def cmd_tui(full: bool = typer.Option(False, "--full", help="Use the full terminal screen.")) -> None:
+    NihilHistoryTUI().run(inline=not full)
 
 
 def tui_main() -> None:
+    parser = argparse.ArgumentParser(description="Browse nihil-history interactively.")
+    parser.add_argument("--full", action="store_true", help="Use the full terminal screen.")
+    args = parser.parse_args()
     init_db()
     ensure_default_engagement()
     try:
@@ -508,7 +512,7 @@ def tui_main() -> None:
         import_nxc_db(workspace_name=entry.nxc_workspace or entry.name)
     except Exception:
         pass
-    NihilHistoryTUI().run()
+    NihilHistoryTUI().run(inline=not args.full)
 
 
 @export_app.command("json")
