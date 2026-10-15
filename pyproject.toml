@@ -24,6 +24,7 @@ license = "MIT"
 nihil-history = "nihil_history.cli:app"
 nhi = "nihil_history.cli:app"
 nhit = "nihil_history.cli:tui_main"
+nhitf = "nihil_history.cli:tui_main"
 
 [project.optional-dependencies]
 dev = [

@@ -445,7 +445,7 @@ def cmd_env_export(
 def cmd_env_install_shell(
     shell: str = typer.Option(None, "--shell", help="Target shell (zsh|bash). Defaults to $SHELL."),
 ) -> None:
-    """Patch ~/.zshrc or ~/.bashrc with auto-source + nhi/nhit/nihil-history wrappers."""
+    """Patch ~/.zshrc or ~/.bashrc with auto-source + nhi/nhit/nhitf/nihil-history wrappers."""
     try:
         rc_path = install_shell_integration(shell)
     except ValueError as exc:
@@ -503,7 +503,7 @@ def cmd_tui(full: bool = typer.Option(False, "--full", help="Use the full termin
 
 def tui_main() -> None:
     parser = argparse.ArgumentParser(description="Browse nihil-history interactively.")
-    parser.add_argument("--full", action="store_true", help="Use the full terminal screen.")
+    parser.add_argument("--full", action="store_true", default=Path(sys.argv[0]).name == "nhitf", help="Use the full terminal screen.")
     args = parser.parse_args()
     init_db()
     ensure_default_engagement()

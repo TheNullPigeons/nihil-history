@@ -394,6 +394,13 @@ class SearchInput(Input):
         app._close_search(clear=False)
 
 
+class HelpScroll(VerticalScroll):
+    BINDINGS = [
+        Binding("j", "scroll_down", show=False),
+        Binding("k", "scroll_up", show=False),
+    ]
+
+
 class HelpScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("escape,?,q", "close", "Close help"),
@@ -415,35 +422,70 @@ class HelpScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Container(id="help-dialog"):
             yield Label("Keyboard shortcuts")
-            with VerticalScroll(id="help-scroll"):
+            with HelpScroll(id="help-scroll"):
                 yield Markdown("""
+## Main interface
+
 | Shortcut | Action |
 | --- | --- |
-| Left / Right, h / l | Previous / next tab from a table. |
-| 1 / 2 / 3 / 4 | Credentials / Hosts / Targets / Access Matrix. |
-| Up / Down, j / k | Move between rows. |
-| g / G | First / last row. |
 | Tab / Shift+Tab | Move focus between controls. |
-| / | Open search and filter the current data. |
-| Enter or Tab in search | Keep the filter and return to the table. |
-| Escape in search | Clear the filter and return to the table. |
-| a | Add an item in the current tab. |
-| e | Edit the selected item. |
-| d | Delete the selected item, after confirmation. |
-| s | Set the selected credential, host, or target as active. |
-| Enter | Set the selected credential, host, or target and quit; show link details in Access Matrix. |
-| L (Shift+L) | Create a credential-to-host access link. |
-| Ctrl+D | Toggle the selected host's DC role (Hosts tab). |
-| v | Start / stop visual row selection (Credentials and Hosts). |
-| j / k or Up / Down in visual mode | Extend the selection; d deletes selected rows after confirmation. |
-| Escape in visual mode | Cancel the selection. |
-| y / p | Copy a row internally / paste it as a new entry. |
 | Ctrl+E | Open the engagement manager. |
 | r | Refresh data. |
 | ? | Open this help. |
 | q / Ctrl+q | Quit the main interface. |
 
-Scroll with Up / Down or PageUp / PageDown. Escape, ?, or q closes this help.
+## Tables — navigation and editing
+
+| Shortcut | Action |
+| --- | --- |
+| ← / →, h / l | Previous / next tab from a table. |
+| 1 / 2 / 3 / 4 | Credentials / Hosts / Targets / Access Matrix. |
+| ↑ / ↓, j / k | Move between rows. |
+| g / G | First / last row. |
+| / | Open search and filter the current data. |
+| a | Add an item in the current tab. |
+| e | Edit the selected item. |
+| d | Delete the selected item, after confirmation. |
+| y / p | Copy a row internally / paste it as a new entry. |
+
+## Credentials, Hosts and Targets
+
+| Shortcut | Action |
+| --- | --- |
+| s | Set the selected credential, host, or target as active. |
+| Enter | Set the selected credential, host, or target and quit. |
+| Ctrl+D | Toggle the selected host's DC role (Hosts only). |
+
+## Access links
+
+| Shortcut | Action |
+| --- | --- |
+| L (Shift+L) | Create a credential-to-host access link. |
+| Enter in Access Matrix | Show the selected link's details. |
+
+## Search field
+
+| Shortcut | Action |
+| --- | --- |
+| Enter / Tab | Keep the filter and return to the table. |
+| Escape | Clear the filter and return to the table. |
+
+## Visual selection — Credentials and Hosts
+
+| Shortcut | Action |
+| --- | --- |
+| v | Start / stop visual row selection. |
+| ↑ / ↓, j / k | Extend the selection. |
+| d | Delete selected rows after confirmation. |
+| Escape | Cancel the selection. |
+
+## This help
+
+| Shortcut | Action |
+| --- | --- |
+| ↑ / ↓, j / k | Scroll the help. |
+| PageUp / PageDown | Scroll by page. |
+| Escape / ? / q | Close the help. |
 """)
             yield Button("Close (Esc)", id="help-close")
 

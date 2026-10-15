@@ -19,9 +19,10 @@ class TuiCliTests(unittest.TestCase):
                 app.return_value.run.assert_called_once_with(inline=inline)
 
     def test_nhit_mode_flag(self):
-        for flags, inline in (([], True), (["--full"], False)):
-            with self.subTest(flags=flags), \
-                 patch("sys.argv", ["nhit", *flags]), \
+        for command, flags, inline in (("nhit", [], True), ("nhit", ["--full"], False),
+                                       ("nhitf", [], False), ("nhitf", ["--full"], False)):
+            with self.subTest(command=command, flags=flags), \
+                 patch("sys.argv", [command, *flags]), \
                  patch.object(cli, "init_db"), \
                  patch.object(cli, "ensure_default_engagement"), \
                  patch.object(cli, "require_engagement"), \
