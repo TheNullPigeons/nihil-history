@@ -8,6 +8,7 @@ from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
+from textual.strip import Strip
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Markdown, Static, TabPane, TabbedContent
 
 from nihil_history.config import load_config
@@ -442,7 +443,7 @@ class HelpScreen(ModalScreen[None]):
 | Shortcut | Action |
 | --- | --- |
 | ← / →, h / l | Previous / next tab from a table. |
-| 1 / 2 / 3 / 4 | Credentials / Hosts / Targets / Access Matrix. |
+| 1 / 2 / 3 / 4 or F1 / F2 / F3 / F4 | Credentials / Hosts / Targets / Access Matrix. |
 | ↑ / ↓, j / k | Move between rows. |
 | g / G | First / last row. |
 | / | Open search and filter the current data. |
@@ -506,9 +507,26 @@ class HelpScreen(ModalScreen[None]):
 
 class HistoryTable(DataTable):
     BINDINGS = [
+        Binding("up", "app.vi_up", "Previous row", show=False),
+        Binding("down", "app.vi_down", "Next row", show=False),
         Binding("left", "app.tab_prev", "Previous tab", show=False),
         Binding("right", "app.tab_next", "Next tab", show=False),
     ]
+
+    def render_line(self, y: int) -> Strip:
+        # Inline mode may paint before Textual's idle-time column measurement.
+        if self._require_update_dimensions:
+            self._require_update_dimensions = False
+            new_rows = self._new_rows.copy()
+            self._new_rows.clear()
+            self._update_dimensions(new_rows)
+        return super().render_line(y)
+
+    def _update_dimensions(self, new_rows) -> None:
+        super()._update_dimensions(new_rows)
+        # Inline refreshes may cache cells before their columns have been measured.
+        self._clear_caches()
+        self.refresh()
 
 
 class NihilHistoryTUI(App[None]):
@@ -518,10 +536,10 @@ class NihilHistoryTUI(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("ctrl+e", "engagement", "Engagement"),
-        Binding("1", "tab_creds", "Credentials"),
-        Binding("2", "tab_hosts", "Hosts"),
-        Binding("3", "tab_targets", "Targets"),
-        Binding("4", "tab_matrix", "Matrix"),
+        Binding("1,f1", "tab_creds", "Credentials"),
+        Binding("2,f2", "tab_hosts", "Hosts"),
+        Binding("3,f3", "tab_targets", "Targets"),
+        Binding("4,f4", "tab_matrix", "Matrix"),
         Binding("a", "add_item", "Add"),
         Binding("d", "delete_item", "Delete"),
         Binding("e", "edit_item", "Edit"),
@@ -682,6 +700,7 @@ class NihilHistoryTUI(App[None]):
 
     @on(TabbedContent.TabActivated)
     def _on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        self._focus_active_table()
         # The search filter is shared global state across all tabs' lists,
         # so leaving it active after switching tabs silently filters a tab
         # you never searched in (e.g. "/administrator" on creds, then
@@ -1147,6 +1166,14 @@ class NihilHistoryTUI(App[None]):
         self._close_search(clear=False)
 
     def on_key(self, event) -> None:
+        if event.key in ("up", "down") and self.screen is self.screen_stack[0] and not isinstance(self.focused, Input):
+            if event.key == "up":
+                self.action_vi_up()
+            else:
+                self.action_vi_down()
+            event.stop()
+            event.prevent_default()
+            return
         bar = self.query_one("#search_bar", Input)
         if event.key == "escape" and bar.display and bar.has_focus:
             self._close_search()

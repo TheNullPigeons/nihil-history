@@ -45,7 +45,7 @@ from nihil_history.sync_nmap import import_nmap_xml
 from nihil_history.sync_nxc import import_nxc_db
 from nihil_history.tui import NihilHistoryTUI
 
-app = typer.Typer(no_args_is_help=True, help="nihil-history CLI")
+app = typer.Typer(no_args_is_help=True, help="nihil-history CLI", context_settings={"help_option_names": ["-h", "--help"]})
 engagement_app = typer.Typer(no_args_is_help=True, help="Manage engagements.")
 creds_app = typer.Typer(no_args_is_help=True, help="Manage credentials.")
 hosts_app = typer.Typer(no_args_is_help=True, help="Manage hosts.")

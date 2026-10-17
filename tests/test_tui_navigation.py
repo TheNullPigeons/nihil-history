@@ -3,16 +3,78 @@ import unittest
 from unittest.mock import patch
 
 from textual.containers import VerticalScroll
+from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Input, Markdown, TabbedContent
 
-from nihil_history.tui import HelpScreen, NihilHistoryTUI, QuickInputScreen
+from nihil_history.tui import HelpScreen, MultiFieldScreen, NihilHistoryTUI, QuickInputScreen
 
 
 class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self.refresh_all = NihilHistoryTUI._refresh_all
         self.enterContext(patch("nihil_history.tui.ensure_default_engagement"))
         self.enterContext(patch("nihil_history.tui.load_config", return_value=SimpleNamespace(current_engagement="test")))
         self.enterContext(patch.object(NihilHistoryTUI, "_refresh_all"))
+
+    async def test_number_tabs_keep_table_focus(self):
+        app = NihilHistoryTUI()
+        async with app.run_test() as pilot:
+            for key, tab in (("2", "hosts"), ("3", "targets"), ("4", "matrix"), ("1", "creds"),
+                             ("f2", "hosts"), ("f3", "targets"), ("f4", "matrix"), ("f1", "creds")):
+                await pilot.press(key)
+                self.assertEqual(app.focused.id, f"{tab}_table")
+
+    async def test_vertical_arrows_restore_table_focus_and_extend_selection(self):
+        app = NihilHistoryTUI()
+        async with app.run_test() as pilot:
+            app.state.hosts = [SimpleNamespace(id=i, ip=f"10.10.10.{i}", hostname="host",
+                                               operating_system="Windows", role=None) for i in range(3)]
+            app._apply_search()
+            await pilot.press("2")
+            table = app.query_one("#hosts_table", DataTable)
+            app.query_one("TabbedContent Tabs").focus()
+            await pilot.press("down")
+            self.assertIs(app.focused, table)
+            self.assertEqual(table.cursor_row, 1)
+            await pilot.press("v", "down")
+            self.assertEqual(table.get_cell_at(Coordinate(2, 0)), "▶")
+            await pilot.press("up")
+            self.assertEqual(table.get_cell_at(Coordinate(2, 0)), " ")
+
+    async def test_host_widths_survive_form_refresh_in_inline_mode(self):
+        app = NihilHistoryTUI()
+        with patch.object(NihilHistoryTUI, "is_inline", property(lambda self: True)):
+            async with app.run_test(size=(100, 24)) as pilot:
+                hosts = [SimpleNamespace(id=8, ip="10.100.100.100", hostname="LLDAP01.example.test",
+                                         operating_system="Windows Server 2022", role=None)]
+                self.enterContext(patch("nihil_history.tui.creds_list", return_value=[]))
+                self.enterContext(patch("nihil_history.tui.hosts_list", return_value=hosts))
+                self.enterContext(patch("nihil_history.tui.access_list", return_value=[]))
+                self.enterContext(patch("nihil_history.tui.targets_list", return_value=[]))
+                self.enterContext(patch.object(app, "_refresh_all", self.refresh_all.__get__(app)))
+                app._refresh_all()
+                await pilot.press("2")
+                await pilot.pause()
+                table = app.query_one("#hosts_table", DataTable)
+                first_frames = []
+
+                def refresh_before_layout(_):
+                    app._refresh_all()
+                    # Inline mode can paint the table before column measurement runs.
+                    first_frames.append(table.render_line(1).text)
+
+                for ip in ("10.100.100.100", "2001:db8:abcd:ffff:eeee:dddd:cccc:bbbb"):
+                    hosts[0].ip = ip
+                    app.push_screen(MultiFieldScreen("Edit host", [("IP", "", hosts[0].ip)]),
+                                    callback=refresh_before_layout)
+                    await pilot.pause()
+                    await pilot.press("enter")
+                    await pilot.pause()
+                    for index, value in ((2, hosts[0].ip), (3, hosts[0].hostname), (4, hosts[0].operating_system)):
+                        column = table.ordered_columns[index]
+                        self.assertGreaterEqual(max(column.width, column.content_width), len(value))
+                        self.assertIn(value, first_frames[-1])
+                        self.assertIn(value, table.render_line(1).text)
 
     async def test_arrows_switch_tabs_from_initial_table_without_tab_key(self):
         app = NihilHistoryTUI()
@@ -132,6 +194,8 @@ class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(bar.cursor_position, 1)
             await pilot.press("right")
             self.assertEqual(bar.cursor_position, 2)
+            await pilot.press("up", "down")
+            self.assertIs(app.focused, bar)
             self.assertEqual(app.query_one(TabbedContent).active, "creds")
             app._close_search()
             app.push_screen(QuickInputScreen("Test", ""))
@@ -144,6 +208,8 @@ class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(field.cursor_position, 1)
             await pilot.press("right")
             self.assertEqual(field.cursor_position, 2)
+            await pilot.press("up", "down")
+            self.assertIs(app.focused, field)
 
 
 if __name__ == "__main__":
