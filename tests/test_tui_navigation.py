@@ -6,7 +6,7 @@ from textual.containers import VerticalScroll
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Input, Markdown, TabbedContent
 
-from nihil_history.tui import HelpScreen, MultiFieldScreen, NihilHistoryTUI, QuickInputScreen
+from nihil_history.tui import EngagementScreen, HelpScreen, MultiFieldScreen, NihilHistoryTUI, QuickInputScreen
 
 
 class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
@@ -15,6 +15,21 @@ class TuiNavigationTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch("nihil_history.tui.ensure_default_engagement"))
         self.enterContext(patch("nihil_history.tui.load_config", return_value=SimpleNamespace(current_engagement="test")))
         self.enterContext(patch.object(NihilHistoryTUI, "_refresh_all"))
+
+    async def test_engagement_new_accepts_a_and_n(self):
+        app = NihilHistoryTUI()
+        with patch("nihil_history.tui.engagement_init") as create:
+            async with app.run_test() as pilot:
+                manager = EngagementScreen("test", ["test"])
+                app.push_screen(manager)
+                await pilot.pause()
+                for key in ("a", "n"):
+                    await pilot.press(key)
+                    self.assertIsInstance(app.screen, QuickInputScreen)
+                    await pilot.press(*f"{key}-engagement", "enter")
+                    create.assert_called_with(f"{key}-engagement")
+                    self.assertIs(app.screen, manager)
+                    self.assertIn(f"{key}-engagement", manager.existing)
 
     async def test_number_tabs_keep_table_focus(self):
         app = NihilHistoryTUI()

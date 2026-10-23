@@ -187,7 +187,7 @@ class MultiFieldScreen(ModalScreen[list[str] | None]):
 class EngagementScreen(ModalScreen[str | None]):
     BINDINGS = [
         Binding("enter", "select_row", "Select"),
-        Binding("n", "new_engagement", "New"),
+        Binding("a,n", "new_engagement", "New"),
         Binding("r", "rename_engagement", "Rename"),
         Binding("d", "delete_engagement", "Delete"),
         Binding("j", "vi_down", "↓", show=False),
@@ -236,7 +236,7 @@ class EngagementScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Label("Engagement manager", id="title")
-            yield Label("Enter / select  |  n new  |  r rename  |  d delete  |  Esc cancel", id="hint")
+            yield Label("Enter / select  |  a/n new  |  r rename  |  d delete  |  Esc cancel", id="hint")
             yield DataTable(id="eng_table", cursor_type="row")
             with Container(id="row"):
                 yield Button("Select", variant="success", id="select")
@@ -565,7 +565,7 @@ class NihilHistoryTUI(App[None]):
       layout: vertical;
     }
     Screen:inline {
-      height: 50vh;
+      height: 90vh;
     }
     #status {
       height: 1;
