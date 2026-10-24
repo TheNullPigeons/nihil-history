@@ -1,4 +1,4 @@
-Standalone offensive engagement knowledge tool embedded in nihil containers. Tracks engagements, credentials, hosts, and access links across sessions.
+Standalone offensive engagement knowledge tool embedded in nihil containers. Tracks engagements, credentials, hosts, and access links across sessions. Hosts can have multiple comma-separated roles such as `DC,ADCS,SCCM`.
 
 Run `nhi tui` or `nhit` to open the interface below the command line, using 90% of the terminal height and preserving terminal scrollback. Run `nhitf`, or add `--full` (`nhi tui --full` or `nhit --full`), to use the full terminal screen.
 

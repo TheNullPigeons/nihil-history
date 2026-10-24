@@ -4,6 +4,7 @@ import ipaddress
 import sqlite3
 from pathlib import Path
 
+from nihil_history.config import load_config
 from nihil_history.services import access_link, access_list, creds_add, creds_list, hosts_add, hosts_list
 from nihil_history.validators import validate_domain
 
@@ -333,6 +334,7 @@ def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None
         raise FileNotFoundError(f"NXC workspaces directory not found: {root}")
 
     added_creds = added_hosts = added_links = 0
+    config = load_config()
 
     if workspace_name:
         candidates = [root / workspace_name]
@@ -343,8 +345,8 @@ def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None
     # insert, instead of re-querying (and re-decrypting) the whole table for
     # every single NXC row - that O(n^2) pattern is what made syncing slow
     # on large histories.
-    cred_index = _build_cred_index(creds_list())
-    host_pairs, host_by_ip = _build_host_index(hosts_list())
+    cred_index = _build_cred_index(creds_list()) if config.sync_credentials else {}
+    host_pairs, host_by_ip = _build_host_index(hosts_list()) if config.sync_hosts else (set(), {})
 
     for workspace in candidates:
         if not workspace.is_dir():
@@ -359,9 +361,9 @@ def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None
             if not db_path.is_file():
                 continue
             proto = db_file.replace(".db", "")
-            if cred_q:
+            if cred_q and config.sync_credentials:
                 all_creds.extend(_extract_creds(db_path, cred_q, source))
-            if host_q:
+            if host_q and config.sync_hosts:
                 all_hosts.extend(_extract_hosts(db_path, host_q, source))
 
         for h in all_hosts:
@@ -415,7 +417,7 @@ def import_nxc_db(workspaces_path: str | None = None, workspace_name: str | None
 
         # Access Matrix: derive cred<->host links from NXC admin/loggedin
         # relations (runs after creds + hosts are imported so they resolve).
-        for db_file in _DB_QUERIES:
+        for db_file in _DB_QUERIES if config.sync_credentials and config.sync_hosts else ():
             db_path = workspace / db_file
             if not db_path.is_file():
                 continue

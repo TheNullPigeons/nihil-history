@@ -347,7 +347,7 @@ def hosts_add(ip: str | None, hostname: str | None, domain: str | None, operatin
             hostname=hostname,
             domain=domain,
             operating_system=operating_system,
-            role=role.upper() if role else None,
+            role=",".join(dict.fromkeys(r.strip().upper() for r in role.split(",") if r.strip())) if role else None,
             note=f"source={source}",
         )
         session.add(host)
@@ -369,8 +369,9 @@ def hosts_set(host_id: int) -> Host:
             raise ValueError(f"Host {host_id} not found in active engagement.")
     cfg = load_config()
     cfg.selected_host_id = host_id
-    if host.role:
-        cfg.selected_role_hosts[host.role.upper()] = host_id
+    for role_name in (host.role or "").split(","):
+        if role_name.strip():
+            cfg.selected_role_hosts[role_name.strip().upper()] = host_id
     save_config(cfg)
     try:
         write_env_file()
@@ -393,7 +394,10 @@ def hosts_remove(host_id: int) -> None:
     cfg = load_config()
     if cfg.selected_host_id == host_id:
         cfg.selected_host_id = None
-        save_config(cfg)
+    for role_name, selected_id in list(cfg.selected_role_hosts.items()):
+        if selected_id == host_id:
+            cfg.selected_role_hosts.pop(role_name, None)
+    save_config(cfg)
 
 
 def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str | None, operating_system: str | None, role: str | None = None) -> Host:
@@ -404,8 +408,9 @@ def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str
         host = session.scalar(select(Host).where(Host.id == host_id, Host.engagement_id == eid))
         if host is None:
             raise ValueError(f"Host {host_id} not found in active engagement.")
-        old_role = (host.role or "").upper() or None
-        new_role = role.upper() if role else None
+        old_roles = {r.strip().upper() for r in (host.role or "").split(",") if r.strip()}
+        new_roles = list(dict.fromkeys(r.strip().upper() for r in (role or "").split(",") if r.strip()))
+        new_role = ",".join(new_roles) or None
         host.ip = ip
         host.hostname = hostname
         host.domain = domain
@@ -416,12 +421,14 @@ def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str
 
     cfg = load_config()
     changed = False
-    if old_role and cfg.selected_role_hosts.get(old_role) == host_id and old_role != new_role:
-        cfg.selected_role_hosts.pop(old_role, None)
-        changed = True
-    if new_role and cfg.selected_role_hosts.get(new_role) != host_id:
-        cfg.selected_role_hosts[new_role] = host_id
-        changed = True
+    for role_name in old_roles - set(new_roles):
+        if cfg.selected_role_hosts.get(role_name) == host_id:
+            cfg.selected_role_hosts.pop(role_name, None)
+            changed = True
+    for role_name in new_roles:
+        if cfg.selected_role_hosts.get(role_name) != host_id:
+            cfg.selected_role_hosts[role_name] = host_id
+            changed = True
     if changed:
         save_config(cfg)
     try:
@@ -822,11 +829,11 @@ def env_exports() -> Iterable[tuple[str, str]]:
             host = hosts_by_id.get(host_id)
             if host is None:
                 continue
-            if role_upper == "DC":
+            if role_upper in {"DC", "ADCS", "WSUS", "SCCM"}:
                 if host.ip:
-                    yield ("DC_IP", host.ip)
+                    yield (f"{role_upper}_IP", host.ip)
                 if host.hostname:
-                    yield ("DC_HOST", host.hostname)
+                    yield (f"{role_upper}_HOST", host.hostname)
     if tgts:
         selected_target = next((t for t in tgts if t.id == cfg.selected_target_id), tgts[-1])
         yield ("TARGET_USER", selected_target.user or "")

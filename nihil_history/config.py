@@ -17,6 +17,8 @@ class AppConfig:
     selected_role_hosts: dict = None  # role (uppercase) -> host_id
     selected_target_id: int | None = None
     encryption_enabled: bool = False
+    sync_credentials: bool = True
+    sync_hosts: bool = True
 
     def __post_init__(self):
         if self.selected_role_hosts is None:
@@ -105,6 +107,10 @@ def load_config() -> AppConfig:
     selected_role_hosts = raw.get("selected_role_hosts") or {}
     selected_target_id = raw.get("selected_target_id")
     encryption_enabled = bool(raw.get("encryption_enabled", os.environ.get("NIHIL_HISTORY_ENCRYPTION", "0") == "1"))
+    env_sync_credentials = os.environ.get("NIHIL_HISTORY_SYNC_CREDENTIALS", "1").lower() not in ("0", "false", "no", "off")
+    env_sync_hosts = os.environ.get("NIHIL_HISTORY_SYNC_HOSTS", "1").lower() not in ("0", "false", "no", "off")
+    sync_credentials = bool(raw.get("sync_credentials", env_sync_credentials))
+    sync_hosts = bool(raw.get("sync_hosts", env_sync_hosts))
     return AppConfig(
         db_path=db_path,
         current_engagement=current_engagement,
@@ -113,6 +119,8 @@ def load_config() -> AppConfig:
         selected_role_hosts=selected_role_hosts,
         selected_target_id=selected_target_id,
         encryption_enabled=encryption_enabled,
+        sync_credentials=sync_credentials,
+        sync_hosts=sync_hosts,
     )
 
 
@@ -126,6 +134,8 @@ def save_config(config: AppConfig) -> None:
         "selected_role_hosts": config.selected_role_hosts,
         "selected_target_id": config.selected_target_id,
         "encryption_enabled": config.encryption_enabled,
+        "sync_credentials": config.sync_credentials,
+        "sync_hosts": config.sync_hosts,
     }
     try:
         cfg_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

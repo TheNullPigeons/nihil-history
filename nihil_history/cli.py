@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from nihil_history.config import load_config, save_config
 from nihil_history.db import init_db
 from nihil_history.services import (
     MissingEngagementError,
@@ -54,6 +55,7 @@ access_app = typer.Typer(no_args_is_help=True, help="Manage access links.")
 env_app = typer.Typer(no_args_is_help=True, help="Print environment exports.")
 sync_app = typer.Typer(no_args_is_help=True, help="Synchronize from external tools.")
 export_app = typer.Typer(no_args_is_help=True, help="Export engagement reports.")
+config_app = typer.Typer(no_args_is_help=True, help="Manage nihil-history settings.")
 console = Console()
 
 
@@ -84,6 +86,24 @@ app.add_typer(access_app, name="access")
 app.add_typer(env_app, name="env")
 app.add_typer(sync_app, name="sync")
 app.add_typer(export_app, name="export")
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("sync")
+def cmd_config_sync(
+    credentials: bool | None = typer.Option(None, "--credentials/--no-credentials", help="Enable or disable credential synchronization."),
+    hosts: bool | None = typer.Option(None, "--hosts/--no-hosts", help="Enable or disable host synchronization."),
+) -> None:
+    config = load_config()
+    if credentials is not None:
+        config.sync_credentials = credentials
+    if hosts is not None:
+        config.sync_hosts = hosts
+    save_config(config)
+    console.print(
+        f"[green]Sync settings:[/green] credentials={'on' if config.sync_credentials else 'off'}, "
+        f"hosts={'on' if config.sync_hosts else 'off'}"
+    )
 
 
 @engagement_app.command("init")
@@ -215,7 +235,7 @@ def cmd_hosts_add(
     hostname: str | None = typer.Option(None, "--hostname"),
     domain: str | None = typer.Option(None, "--domain"),
     os_name: str | None = typer.Option(None, "--os"),
-    role: str | None = typer.Option(None, "--role"),
+    role: str | None = typer.Option(None, "--role", help="Comma-separated roles (e.g. DC,ADCS)."),
 ) -> None:
     try:
         host = hosts_add(ip=ip, hostname=hostname, domain=domain, operating_system=os_name, role=role)

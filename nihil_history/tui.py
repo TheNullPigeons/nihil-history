@@ -11,7 +11,7 @@ from textual.screen import ModalScreen
 from textual.strip import Strip
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Markdown, Static, TabPane, TabbedContent
 
-from nihil_history.config import load_config
+from nihil_history.config import load_config, save_config
 from nihil_history.services import (
     MissingEngagementError,
     ensure_default_engagement,
@@ -434,6 +434,7 @@ class HelpScreen(ModalScreen[None]):
 | --- | --- |
 | Tab / Shift+Tab | Move focus between controls. |
 | Ctrl+E | Open the engagement manager. |
+| C | Configure credential and host synchronization. |
 | r | Refresh data. |
 | ? | Open this help. |
 | q / Ctrl+q | Quit the main interface. |
@@ -530,12 +531,13 @@ class HistoryTable(DataTable):
 
 
 class NihilHistoryTUI(App[None]):
-    TITLE = "nxh tui"
+    TITLE = "nihil-history"
     SUB_TITLE = "Credentials, hosts, and access matrix"
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("ctrl+e", "engagement", "Engagement"),
+        Binding("C", "sync_config", "Sync config"),
         Binding("1,f1", "tab_creds", "Credentials"),
         Binding("2,f2", "tab_hosts", "Hosts"),
         Binding("3,f3", "tab_targets", "Targets"),
@@ -641,6 +643,31 @@ class NihilHistoryTUI(App[None]):
     def action_refresh(self) -> None:
         self._refresh_all()
 
+    def action_sync_config(self) -> None:
+        config = load_config()
+        self.push_screen(
+            MultiFieldScreen(
+                "Synchronization settings (on/off)",
+                [
+                    ("Credentials", "on or off", "on" if config.sync_credentials else "off"),
+                    ("Hosts", "on or off", "on" if config.sync_hosts else "off"),
+                ],
+            ),
+            self._save_sync_config,
+        )
+
+    def _save_sync_config(self, values: list[str] | None) -> None:
+        if values is None:
+            return
+        config = load_config()
+        config.sync_credentials = values[0].lower() in ("1", "true", "yes", "on")
+        config.sync_hosts = values[1].lower() in ("1", "true", "yes", "on")
+        save_config(config)
+        self._set_status(
+            f"Sync: credentials={'on' if config.sync_credentials else 'off'}, "
+            f"hosts={'on' if config.sync_hosts else 'off'}"
+        )
+
     def action_help_quit(self) -> None:
         self.notify("Press [b]q[/b] or [b]Ctrl+q[/b] to quit the app", title="Do you want to quit?")
 
@@ -739,7 +766,7 @@ class NihilHistoryTUI(App[None]):
                         ("IP", "10.10.10.10", ""),
                         ("Hostname", "DC01", ""),
                         ("OS", "Windows Server 2022", ""),
-                        ("Role  [DC, WS, SRV, WEB, ...]", "DC", ""),
+                        ("Role(s)  [comma-separated: DC, ADCS, WSUS, SCCM, ...]", "DC,ADCS", ""),
                     ],
                 ),
                 callback=self._on_add_host,
@@ -851,7 +878,7 @@ class NihilHistoryTUI(App[None]):
                         ("IP", "10.10.10.10", selected.ip or ""),
                         ("Hostname", "DC01", selected.hostname or ""),
                         ("OS", "Windows Server 2022", selected.operating_system or ""),
-                        ("Role  [DC, WS, SRV, WEB, ...]", "DC", selected.role or ""),
+                        ("Role  [DC, ADCS, WSUS, SCCM, ...]", "DC", selected.role or ""),
                     ],
                 ),
                 callback=lambda values: self._on_edit_host(values, selected.id),
@@ -941,7 +968,12 @@ class NihilHistoryTUI(App[None]):
         selected = self._selected_host()
         if selected is None:
             return
-        new_role = None if selected.role == "DC" else "DC"
+        roles = [r.strip().upper() for r in (selected.role or "").split(",") if r.strip()]
+        if "DC" in roles:
+            roles.remove("DC")
+            new_role = ",".join(roles) or None
+        else:
+            new_role = ",".join([*roles, "DC"])
         try:
             hosts_update(
                 host_id=selected.id,

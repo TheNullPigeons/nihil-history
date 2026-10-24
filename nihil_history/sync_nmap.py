@@ -3,6 +3,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from nihil_history.config import load_config
 from nihil_history.services import hosts_add, hosts_list
 
 
@@ -11,6 +12,8 @@ def _host_exists(ip: str) -> bool:
 
 
 def import_nmap_xml(path: str) -> dict[str, int]:
+    if not load_config().sync_hosts:
+        return {"hosts": 0}
     xml_path = Path(path)
     root = ET.fromstring(xml_path.read_text(encoding="utf-8", errors="ignore"))
     added_hosts = 0
