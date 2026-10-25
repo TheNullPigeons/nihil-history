@@ -56,6 +56,7 @@ class Host(Base):
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     operating_system: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ca_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
 

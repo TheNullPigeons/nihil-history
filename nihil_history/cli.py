@@ -236,9 +236,10 @@ def cmd_hosts_add(
     domain: str | None = typer.Option(None, "--domain"),
     os_name: str | None = typer.Option(None, "--os"),
     role: str | None = typer.Option(None, "--role", help="Comma-separated roles (e.g. DC,ADCS)."),
+    ca_name: str | None = typer.Option(None, "--ca-name", help="AD CS common name, exported as CA_NAME."),
 ) -> None:
     try:
-        host = hosts_add(ip=ip, hostname=hostname, domain=domain, operating_system=os_name, role=role)
+        host = hosts_add(ip=ip, hostname=hostname, domain=domain, operating_system=os_name, role=role, ca_name=ca_name)
     except MissingEngagementError as exc:
         _handle_missing_engagement(exc)
     except ValueError as exc:
@@ -260,8 +261,9 @@ def cmd_hosts_list() -> None:
     table.add_column("Domain")
     table.add_column("OS")
     table.add_column("Role")
+    table.add_column("CA_NAME")
     for host in entries:
-        table.add_row(str(host.id), host.ip, host.hostname or "-", host.domain or "-", host.operating_system or "-", host.role or "-")
+        table.add_row(str(host.id), host.ip or "-", host.hostname or "-", host.domain or "-", host.operating_system or "-", host.role or "-", host.ca_name or "-")
     console.print(table)
 
 

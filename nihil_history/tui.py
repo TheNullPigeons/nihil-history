@@ -114,6 +114,7 @@ class MultiFieldScreen(ModalScreen[list[str] | None]):
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
         Binding("ctrl+c", "cancel", "Cancel"),
+        Binding("shift+enter", "submit", "OK"),
     ]
     CSS = """
     MultiFieldScreen {
@@ -137,6 +138,11 @@ class MultiFieldScreen(ModalScreen[list[str] | None]):
     Button {
       margin-right: 1;
     }
+    .shortcut-hint {
+      color: $text-muted;
+      content-align: left middle;
+      text-style: dim;
+    }
     """
 
     def __init__(self, title: str, fields: list[tuple[str, str, str]]) -> None:
@@ -153,6 +159,7 @@ class MultiFieldScreen(ModalScreen[list[str] | None]):
                 yield Input(placeholder=placeholder, value=default, id=f"field_{i}")
             with Container(id="row"):
                 yield Button("OK", variant="success", id="ok")
+                yield Static("Shift+Enter", classes="shortcut-hint")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
@@ -164,6 +171,9 @@ class MultiFieldScreen(ModalScreen[list[str] | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_submit(self) -> None:
+        self.dismiss(self._collect())
 
     @on(Button.Pressed, "#cancel")
     def _cancel(self) -> None:
@@ -767,6 +777,7 @@ class NihilHistoryTUI(App[None]):
                         ("Hostname", "DC01", ""),
                         ("OS", "Windows Server 2022", ""),
                         ("Role(s)  [comma-separated: DC, ADCS, WSUS, SCCM, ...]", "DC,ADCS", ""),
+                        ("CA_NAME  [ADCS only]", "CORP-CA", ""),
                     ],
                 ),
                 callback=self._on_add_host,
@@ -878,7 +889,8 @@ class NihilHistoryTUI(App[None]):
                         ("IP", "10.10.10.10", selected.ip or ""),
                         ("Hostname", "DC01", selected.hostname or ""),
                         ("OS", "Windows Server 2022", selected.operating_system or ""),
-                        ("Role  [DC, ADCS, WSUS, SCCM, ...]", "DC", selected.role or ""),
+                        ("Role(s)  [DC, ADCS, WSUS, SCCM, ...]", "DC,ADCS", selected.role or ""),
+                        ("CA_NAME  [ADCS only]", "CORP-CA", selected.ca_name or ""),
                     ],
                 ),
                 callback=lambda values: self._on_edit_host(values, selected.id),
@@ -982,6 +994,7 @@ class NihilHistoryTUI(App[None]):
                 domain=selected.domain,
                 operating_system=selected.operating_system,
                 role=new_role,
+                ca_name=selected.ca_name,
             )
             label = selected.ip or selected.hostname or f"id={selected.id}"
             if new_role:
@@ -1022,7 +1035,7 @@ class NihilHistoryTUI(App[None]):
                           secret=obj.secret, domain=obj.domain, source="yank")
             elif kind == "hosts":
                 hosts_add(ip=obj.ip, hostname=obj.hostname, domain=obj.domain,
-                          operating_system=obj.operating_system, role=obj.role, source="yank")
+                          operating_system=obj.operating_system, role=obj.role, ca_name=obj.ca_name, source="yank")
             elif kind == "targets":
                 targets_add(name=obj.name, user=obj.user, group=obj.group,
                             object_=obj.object, computer=obj.computer, domain=obj.domain,
@@ -1273,8 +1286,8 @@ class NihilHistoryTUI(App[None]):
         if values is None:
             return
         try:
-            ip, hostname, os_name, role = values
-            host = hosts_add(ip=ip or None, hostname=hostname or None, domain=None, operating_system=os_name or None, role=role or None)
+            ip, hostname, os_name, role, ca_name = values
+            host = hosts_add(ip=ip or None, hostname=hostname or None, domain=None, operating_system=os_name or None, role=role or None, ca_name=ca_name or None)
             self.notify(f"{host.ip or host.hostname or '-'}  added (id={host.id})", title="Host added", severity="information")
             self._refresh_all()
         except MissingEngagementError:
@@ -1316,7 +1329,7 @@ class NihilHistoryTUI(App[None]):
         if values is None:
             return
         try:
-            ip, hostname, os_name, role = values
+            ip, hostname, os_name, role, ca_name = values
             hosts_update(
                 host_id=host_id,
                 ip=ip,
@@ -1324,6 +1337,7 @@ class NihilHistoryTUI(App[None]):
                 domain=None,
                 operating_system=os_name or None,
                 role=role or None,
+                ca_name=ca_name or None,
             )
             self.notify(f"Host id={host_id} updated", title="Edited", severity="information")
             self._refresh_all()
@@ -1539,9 +1553,10 @@ class NihilHistoryTUI(App[None]):
         table.add_column("Hostname")
         table.add_column("OS")
         table.add_column("Role")
+        table.add_column("CA_NAME")
         for i, host in enumerate(hosts):
             marker = "▶" if selection is not None and i in selection else " "
-            table.add_row(marker, str(host.id), host.ip or "-", host.hostname or "-", host.operating_system or "-", host.role or "-")
+            table.add_row(marker, str(host.id), host.ip or "-", host.hostname or "-", host.operating_system or "-", host.role or "-", host.ca_name or "-")
         if selection is not None and hosts:
             table.move_cursor(row=max(0, min(prev, len(hosts) - 1)))
 

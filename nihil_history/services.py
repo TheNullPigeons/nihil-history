@@ -336,7 +336,7 @@ def creds_update(
         return _materialize_credential_secrets(cred)
 
 
-def hosts_add(ip: str | None, hostname: str | None, domain: str | None, operating_system: str | None, role: str | None = None, source: str = "manual") -> Host:
+def hosts_add(ip: str | None, hostname: str | None, domain: str | None, operating_system: str | None, role: str | None = None, ca_name: str | None = None, source: str = "manual") -> Host:
     init_db()
     ip = validate_ip(ip) if ip else None
     domain = validate_domain(domain)
@@ -348,6 +348,7 @@ def hosts_add(ip: str | None, hostname: str | None, domain: str | None, operatin
             domain=domain,
             operating_system=operating_system,
             role=",".join(dict.fromkeys(r.strip().upper() for r in role.split(",") if r.strip())) if role else None,
+            ca_name=ca_name.strip() or None if ca_name else None,
             note=f"source={source}",
         )
         session.add(host)
@@ -400,7 +401,7 @@ def hosts_remove(host_id: int) -> None:
     save_config(cfg)
 
 
-def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str | None, operating_system: str | None, role: str | None = None) -> Host:
+def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str | None, operating_system: str | None, role: str | None = None, ca_name: str | None = None) -> Host:
     eid = _engagement_id()
     ip = validate_ip(ip) if ip else None
     domain = validate_domain(domain)
@@ -416,6 +417,7 @@ def hosts_update(host_id: int, ip: str | None, hostname: str | None, domain: str
         host.domain = domain
         host.operating_system = operating_system
         host.role = new_role
+        host.ca_name = ca_name.strip() or None if ca_name else None
         session.commit()
         session.refresh(host)
 
@@ -834,6 +836,8 @@ def env_exports() -> Iterable[tuple[str, str]]:
                     yield (f"{role_upper}_IP", host.ip)
                 if host.hostname:
                     yield (f"{role_upper}_HOST", host.hostname)
+                if role_upper == "ADCS" and host.ca_name:
+                    yield ("CA_NAME", host.ca_name)
     if tgts:
         selected_target = next((t for t in tgts if t.id == cfg.selected_target_id), tgts[-1])
         yield ("TARGET_USER", selected_target.user or "")
